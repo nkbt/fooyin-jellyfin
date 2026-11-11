@@ -4,7 +4,7 @@ Adds a Jellyfin music library to fooyin, with local metadata, native playlists a
 
 Catalog sync runs on connection and when Refresh library is selected. Failed syncs retain the last complete catalog. Jellyfin playlists and favourites are read-only, and playback is reported to the server. The final report sent when fooyin closes is best effort. Signing out hides the catalog while retaining its metadata for reconnection.
 
-The plugin currently requires the included fooyin host patch. It does not work with an unmodified fooyin release.
+The plugin requires [external library support (#4)](https://github.com/nkbt/fooyin/pull/4) from the [`external-libraries` branch of nkbt/fooyin](https://github.com/nkbt/fooyin/tree/external-libraries). It does not work with an unmodified fooyin release.
 
 ![Jellyfin settings](docs/jellyfin-settings.png)
 
@@ -12,14 +12,12 @@ The plugin currently requires the included fooyin host patch. It does not work w
 
 Requires Linux, CMake 3.25 or later, Ninja, a C++23 compiler, Qt 6, libsecret and the [fooyin build dependencies](https://github.com/fooyin/fooyin). Tests also require GoogleTest, Python 3 and OpenSSL.
 
-From this repository, build fooyin 0.15.0 at the supported revision with the host patch:
+From this repository, build the `external-libraries` branch of `nkbt/fooyin`:
 
 ```sh
 mkdir --parents tmp/runtime
 export TMPDIR="$PWD/tmp/runtime"
-git clone https://github.com/fooyin/fooyin.git tmp/fooyin
-git -C tmp/fooyin checkout --detach fc669829bcf937bfb7c3edd3b42b85e43fdd0a27
-git -C tmp/fooyin apply ../../patches/fooyin-jellyfin.patch
+git clone --branch external-libraries --single-branch https://github.com/nkbt/fooyin.git tmp/fooyin
 cmake -S tmp/fooyin -B tmp/fooyin-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/tmp/install" -DINSTALL_HEADERS=ON
 cmake --build tmp/fooyin-build --parallel 2
 cmake --install tmp/fooyin-build
@@ -34,7 +32,7 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir tmp/build --output-on-failure --paral
 cmake --install tmp/build
 ```
 
-Tests use synthetic accounts, media and local servers. No running Jellyfin server or secret service is needed for the test suite. Set `FOOYIN_SOURCE_DIR` to the matching patched fooyin source to include native library and playback integration tests.
+Tests use synthetic accounts, media and local servers. No running Jellyfin server or secret service is needed for the test suite. Set `FOOYIN_SOURCE_DIR` to the matching fooyin source to include native library and playback integration tests.
 
 ## Connect
 
@@ -46,6 +44,6 @@ scripts/launch-candidate.sh --host-prefix "$PWD/tmp/install" --profile-dir "$PWD
 
 Open Settings → Integrations → Jellyfin, enter the server address and select Sign in with Quick Connect. Authorise the displayed code in a signed-in Jellyfin client. Quick Connect must be enabled on the server, and the desktop secret service must be available to save the session.
 
-The host patch adds external library snapshots, source-owned playlists and playback lifecycle events. Plugin code remains separate under `src/`.
+The host PR adds external library snapshots, source-owned playlists and playback lifecycle events. Plugin code remains separate under `src/`.
 
 Released under GPL-3.0-or-later. See [COPYING](COPYING).
