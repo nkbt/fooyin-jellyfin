@@ -2,7 +2,7 @@
 
 Adds a Jellyfin music library to fooyin, with local metadata, native playlists and on-demand audio streaming. Sign-in uses Quick Connect, and session tokens are stored in the desktop secret service.
 
-Catalog sync runs on connection and when Refresh library is selected. Failed syncs retain the last complete catalog. Jellyfin playlists and favourites are read-only, and playback is reported to the server. Signing out hides the catalog while retaining its metadata for reconnection.
+Catalog sync runs on connection and when Refresh library is selected. Failed syncs retain the last complete catalog. Jellyfin playlists and favourites are read-only, and playback is reported to the server. The final report sent when fooyin closes is best effort. Signing out hides the catalog while retaining its metadata for reconnection.
 
 The plugin currently requires the included fooyin host patch. It does not work with an unmodified fooyin release.
 

@@ -61,6 +61,8 @@ public:
     void start(const QString& libraryName);
     void cancel();
     [[nodiscard]] bool isRunning() const;
+    //! Ends the synchronisation as failed with @p message, also after playlistsReady.
+    void fail(const QString& message);
 
 Q_SIGNALS:
     void progressChanged(int fetchedTracks, int totalTracks);
@@ -85,7 +87,6 @@ private:
     void handlePlaylistItems(QNetworkReply* reply);
     void applySnapshot();
     void handleSnapshotApplied(const QUuid& operation, int libraryId, bool success);
-    void fail(const QString& message);
     QNetworkReply* get(const QString& path, const QUrlQuery& query);
     [[nodiscard]] bool acceptReply(QNetworkReply* reply, quint64 run);
 

@@ -21,16 +21,20 @@
 #include "jellyfinrequest.h"
 #include "testsupport.h"
 
+#include <core/network/remotestreamdevice.h>
+
 #include <QElapsedTimer>
 #include <QFile>
 #include <QScopeGuard>
 #include <QSslConfiguration>
 #include <QSslSocket>
 #include <QTest>
-#include <barrier>
-#include <core/network/remotestreamdevice.h>
-#include <future>
+
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <barrier>
+#include <future>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
@@ -57,7 +61,8 @@ protected:
     std::shared_ptr<PendingRemoteStream> prepare(std::stop_token sourceLifetime)
     {
         return m_remoteIoFixture.remoteIo->prepareStream(
-            apiRequest(m_server.url(u"/jf/Audio/track1/stream"_s), m_authorization), sourceLifetime);
+            apiRequest(m_server.url(u"/jf/Audio/track1/stream"_s), m_authorization), m_server.url(u"/jf"_s),
+            sourceLifetime);
     }
     RemoteIoFixture m_remoteIoFixture;
     FakeJellyfinServer m_server;
@@ -120,6 +125,73 @@ TEST_F(JellyfinStreamDeviceTest, PreservesAuthorizationForSameOriginRedirect)
     const auto requests = m_server.requestsForPath(u"/jf/redirected"_s);
     ASSERT_EQ(requests.size(), 1U);
     EXPECT_EQ(requests.front().header("authorization"), m_authorization);
+}
+
+TEST_F(JellyfinStreamDeviceTest, DoesNotForwardAuthorizationOutsideServerBasePath)
+{
+    const QUrl target = m_server.url(u"/other/leak"_s);
+    m_server.setHandler([target](const FakeRequest& request) {
+        if(request.path.endsWith("/stream"_L1)) {
+            return FakeJellyfinServer::redirect(target);
+        }
+        return FakeJellyfinServer::bytes(request, "audio", true);
+    });
+    const auto pending = prepare({});
+    EXPECT_FALSE(pending->waitForReady(5s, {}));
+    EXPECT_TRUE(m_server.requestsForPath(u"/other/leak"_s).empty());
+}
+
+TEST_F(JellyfinStreamDeviceTest, DoesNotForwardAuthorizationThroughDotSegmentsOutsideServerBasePath)
+{
+    const QUrl target = m_server.url(u"/jf/../other/leak"_s);
+    m_server.setHandler([target](const FakeRequest& request) {
+        if(request.path.endsWith("/stream"_L1)) {
+            return FakeJellyfinServer::redirect(target);
+        }
+        return FakeJellyfinServer::bytes(request, "audio", true);
+    });
+    const auto pending = prepare({});
+    EXPECT_FALSE(pending->waitForReady(5s, {}));
+    EXPECT_TRUE(m_server.requestsForPath(u"/other/leak"_s).empty());
+    EXPECT_TRUE(m_server.requestsForPath(u"/jf/../other/leak"_s).empty());
+}
+
+TEST_F(JellyfinStreamDeviceTest, DoesNotFollowRedirectWithUserInformation)
+{
+    QUrl target = m_server.url(u"/jf/redirected"_s);
+    target.setUserInfo(u"synthetic-user:synthetic-password"_s);
+    m_server.setHandler([target](const FakeRequest& request) {
+        if(request.path.endsWith("/stream"_L1)) {
+            return FakeJellyfinServer::redirect(target);
+        }
+        return FakeJellyfinServer::bytes(request, "audio", true);
+    });
+    const auto pending = prepare({});
+    EXPECT_FALSE(pending->waitForReady(5s, {}));
+    EXPECT_TRUE(m_server.requestsForPath(u"/jf/redirected"_s).empty());
+}
+
+TEST_F(JellyfinStreamDeviceTest, DoesNotForwardAuthorizationWhenRangeRequestLeavesServerBasePath)
+{
+    const QByteArray data(512 * 1024, 'a');
+    const QUrl target = m_server.url(u"/other/leak"_s);
+    m_server.setHandler([data, target](const FakeRequest& request) {
+        if(request.header("range") == "bytes=400000-") {
+            return FakeJellyfinServer::redirect(target);
+        }
+        return FakeJellyfinServer::bytes(request, data, true);
+    });
+    const auto pending = prepare({});
+    ASSERT_TRUE(pending->waitForReady(5s, {}));
+    auto source = pending->takeSource();
+    ASSERT_NE(source.device, nullptr);
+    EXPECT_EQ(readBytes(*source.device, 16), data.first(16));
+    source.device->seek(400000);
+    EXPECT_NE(readBytes(*source.device, 32), data.sliced(400000, 32));
+    const auto requests = m_server.requestsForPath(u"/jf/Audio/track1/stream"_s);
+    EXPECT_TRUE(std::ranges::any_of(
+        requests, [](const FakeRequest& request) { return request.header("range") == "bytes=400000-"; }));
+    EXPECT_TRUE(m_server.requestsForPath(u"/other/leak"_s).empty());
 }
 
 TEST_F(JellyfinStreamDeviceTest, SourceCancellationSurvivesReadyAndTakeAndPreventsReopen)
@@ -294,7 +366,7 @@ TEST_F(JellyfinStreamDeviceTest, RejectsUntrustedHttpsCertificateBeforeSendingAu
     FakeJellyfinServer encrypted{QSslCertificate{certificateFile.readAll()}, QSslKey{keyFile.readAll(), QSsl::Rsa}};
     encrypted.setHandler([](const FakeRequest& request) { return FakeJellyfinServer::bytes(request, "audio", true); });
     const auto pending = m_remoteIoFixture.remoteIo->prepareStream(
-        apiRequest(encrypted.url(u"/jf/Audio/track1/stream"_s), m_authorization), {});
+        apiRequest(encrypted.url(u"/jf/Audio/track1/stream"_s), m_authorization), encrypted.url(u"/jf"_s), {});
     EXPECT_FALSE(pending->waitForReady(5s, {}));
     EXPECT_TRUE(encrypted.requests().empty());
 }
@@ -313,7 +385,7 @@ TEST_F(JellyfinStreamDeviceTest, AcceptsExplicitValidHttpsTrustAndPreservesAuthe
     configuration.setCaCertificates({certificate});
     configuration.setPeerVerifyMode(QSslSocket::VerifyPeer);
     request.setSslConfiguration(configuration);
-    const auto pending = m_remoteIoFixture.remoteIo->prepareStream(request, {});
+    const auto pending = m_remoteIoFixture.remoteIo->prepareStream(request, encrypted.url(u"/jf"_s), {});
     ASSERT_TRUE(pending->waitForReady(5s, {}));
     auto source = pending->takeSource();
     ASSERT_NE(source.device, nullptr);
@@ -338,7 +410,7 @@ TEST_F(JellyfinStreamDeviceTest, RejectsHttpsDowngradeWithoutForwardingAuthoriza
     configuration.setCaCertificates({certificate});
     configuration.setPeerVerifyMode(QSslSocket::VerifyPeer);
     request.setSslConfiguration(configuration);
-    const auto pending = m_remoteIoFixture.remoteIo->prepareStream(request, {});
+    const auto pending = m_remoteIoFixture.remoteIo->prepareStream(request, encrypted.url(u"/jf"_s), {});
     EXPECT_FALSE(pending->waitForReady(5s, {}));
     EXPECT_TRUE(m_server.requests().empty());
 }

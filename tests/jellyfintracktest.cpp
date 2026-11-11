@@ -28,24 +28,24 @@ using namespace Qt::StringLiterals;
 namespace Fooyin::Jellyfin::Testing {
 TEST(JellyfinTrackTest, SourceKeyIsStableAndSeparatesAccounts)
 {
-    const QString key = sourceKey(u"server-1"_s, u"user-1"_s);
-    EXPECT_EQ(key, sourceKey(u"server-1"_s, u"user-1"_s));
-    EXPECT_NE(key, sourceKey(u"server-1"_s, u"user-2"_s));
-    EXPECT_NE(key, sourceKey(u"server-2"_s, u"user-1"_s));
-    EXPECT_EQ(key.size(), 32);
-    EXPECT_FALSE(key.contains(u"server-1"_s));
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-1"_s);
+    EXPECT_EQ(sourceKey, Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-1"_s));
+    EXPECT_NE(sourceKey, Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-2"_s));
+    EXPECT_NE(sourceKey, Fooyin::Jellyfin::sourceKey(u"server-2"_s, u"user-1"_s));
+    EXPECT_EQ(sourceKey.size(), 32);
+    EXPECT_FALSE(sourceKey.contains(u"server-1"_s));
 }
 
 TEST(JellyfinTrackTest, TrackPathRoundTripsAndIsVirtual)
 {
-    const QString key  = sourceKey(u"server-1"_s, u"user-1"_s);
-    const QString path = trackPath(key, u"a1b2c3"_s);
-    EXPECT_EQ(path, u"jellyfin://"_s + key + u"/a1b2c3"_s);
-    EXPECT_EQ(sourceKeyFromPath(path), key);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-1"_s);
+    const QString path      = trackPath(sourceKey, u"a1b2c3"_s);
+    EXPECT_EQ(path, u"jellyfin://"_s + sourceKey + u"/a1b2c3"_s);
+    EXPECT_EQ(sourceKeyFromPath(path), sourceKey);
     EXPECT_EQ(itemIdFromPath(path), u"a1b2c3"_s);
     EXPECT_TRUE(Track::isVirtualPath(path));
-    EXPECT_TRUE(Track::isVirtualPath(libraryUri(key)));
-    EXPECT_TRUE(path.startsWith(libraryUri(key) + u'/'));
+    EXPECT_TRUE(Track::isVirtualPath(libraryUri(sourceKey)));
+    EXPECT_TRUE(path.startsWith(libraryUri(sourceKey) + u'/'));
 }
 
 TEST(JellyfinTrackTest, PathParsingRejectsForeignAndInvalidPaths)
@@ -60,7 +60,7 @@ TEST(JellyfinTrackTest, PathParsingRejectsForeignAndInvalidPaths)
 
 TEST(JellyfinTrackTest, CatalogItemMapsAudioMetadataWithoutStreamDetails)
 {
-    const QString key = sourceKey(u"server-1"_s, u"user-1"_s);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-1"_s);
     const QJsonObject item{
         {u"Id"_s, u"item1"_s},
         {u"Type"_s, u"Audio"_s},
@@ -81,10 +81,10 @@ TEST(JellyfinTrackTest, CatalogItemMapsAudioMetadataWithoutStreamDetails)
         {u"AlbumPrimaryImageTag"_s, u"tag1"_s},
     };
 
-    const auto mapped = catalogItem(item, key);
+    const auto mapped = catalogItem(item, sourceKey);
     ASSERT_TRUE(mapped.has_value());
     EXPECT_EQ(mapped->itemId, u"item1"_s);
-    EXPECT_EQ(mapped->track.filepath(), trackPath(key, u"item1"_s));
+    EXPECT_EQ(mapped->track.filepath(), trackPath(sourceKey, u"item1"_s));
     EXPECT_EQ(mapped->track.title(), u"Synthetic Song"_s);
     EXPECT_EQ(mapped->track.album(), u"Synthetic Album"_s);
     EXPECT_EQ(mapped->track.artists(), (QStringList{u"Artist A"_s, u"Artist B"_s}));
@@ -108,9 +108,9 @@ TEST(JellyfinTrackTest, CatalogItemMapsAudioMetadataWithoutStreamDetails)
 
 TEST(JellyfinTrackTest, CatalogItemRejectsOtherTypesAndInvalidIds)
 {
-    const QString key = sourceKey(u"server-1"_s, u"user-1"_s);
-    EXPECT_FALSE(catalogItem(QJsonObject{{u"Id"_s, u"x"_s}, {u"Type"_s, u"MusicAlbum"_s}}, key).has_value());
-    EXPECT_FALSE(catalogItem(QJsonObject{{u"Id"_s, u"../x"_s}, {u"Type"_s, u"Audio"_s}}, key).has_value());
-    EXPECT_FALSE(catalogItem(QJsonObject{{u"Type"_s, u"Audio"_s}}, key).has_value());
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server-1"_s, u"user-1"_s);
+    EXPECT_FALSE(catalogItem(QJsonObject{{u"Id"_s, u"x"_s}, {u"Type"_s, u"MusicAlbum"_s}}, sourceKey).has_value());
+    EXPECT_FALSE(catalogItem(QJsonObject{{u"Id"_s, u"../x"_s}, {u"Type"_s, u"Audio"_s}}, sourceKey).has_value());
+    EXPECT_FALSE(catalogItem(QJsonObject{{u"Type"_s, u"Audio"_s}}, sourceKey).has_value());
 }
 } // namespace Fooyin::Jellyfin::Testing

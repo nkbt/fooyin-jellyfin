@@ -35,7 +35,6 @@
 #include <core/playlist/playlisthandler.h>
 #include <core/plugins/coreplugincontext.h>
 #include <gui/plugins/guiplugincontext.h>
-
 #include <utils/fypaths.h>
 
 #include <QDir>
@@ -76,7 +75,10 @@ void JellyfinPlugin::initialise(const CorePluginContext& context)
 
     QObject::connect(m_account->catalogSync(), &CatalogSync::playlistsReady, this,
                      [this](const QString& sourceKey, const std::vector<MirroredPlaylist>& playlists) {
-                         m_playlistMirror->apply(sourceKey, playlists);
+                         if(!m_playlistMirror->apply(sourceKey, playlists)) {
+                             m_account->catalogSync()->fail(
+                                 tr("Could not save Jellyfin playlists. Refresh the library to try again."));
+                         }
                      });
     QObject::connect(context.playlistHandler, &PlaylistHandler::playlistsPopulated, m_account, &Account::restore,
                      Qt::SingleShotConnection);

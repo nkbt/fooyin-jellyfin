@@ -18,6 +18,7 @@
  */
 
 #include "jellyfinplaybackreporter.h"
+
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
 #include "jellyfintrack.h"

@@ -18,6 +18,7 @@
  */
 
 #include "jellyfininput.h"
+
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
 #include "jellyfintrack.h"
@@ -27,15 +28,15 @@
 #include <core/engine/audioformat.h>
 #include <core/engine/audioloader.h>
 
-#include <QJsonObject>
-
-#include <gtest/gtest.h>
-
 #include <QElapsedTimer>
 #include <QHostAddress>
+#include <QJsonObject>
 #include <QScopeGuard>
 #include <QTcpServer>
 #include <QTcpSocket>
+
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <future>
@@ -308,7 +309,7 @@ protected:
         });
     }
 
-    [[nodiscard]] QString key() const
+    [[nodiscard]] QString sourceKey() const
     {
         return m_access->access()->sourceKey;
     }
@@ -327,7 +328,7 @@ TEST_F(JellyfinInputTest, StreamsOnDemandWithCurrentCredentials)
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
     EXPECT_EQ(decoder.supportedSchemes(), QStringList{u"jellyfin"_s});
 
-    const QString path = trackPath(key(), u"track1"_s);
+    const QString path = trackPath(sourceKey(), u"track1"_s);
     EXPECT_FALSE(path.contains(Token));
     EXPECT_TRUE(m_server.requests().empty());
 
@@ -363,7 +364,7 @@ TEST_F(JellyfinInputTest, SignedOutTrackDoesNotRequestAudio)
 {
     addInnerDecoder();
     const int registeredDecoders = m_log->created;
-    const QString path           = trackPath(key(), u"track1"_s);
+    const QString path           = trackPath(sourceKey(), u"track1"_s);
     m_access->clearAccess();
 
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
@@ -377,7 +378,7 @@ TEST_F(JellyfinInputTest, SignedOutTrackDoesNotRequestAudio)
 TEST_F(JellyfinInputTest, TrackOfAnotherAccountDoesNotUseCurrentCredentials)
 {
     addInnerDecoder();
-    const QString path = trackPath(key(), u"track1"_s);
+    const QString path = trackPath(sourceKey(), u"track1"_s);
     m_access->setAccess(connectionFor(m_server.url(u"/jf"_s), u"user2"_s), Token);
 
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
@@ -390,7 +391,7 @@ TEST_F(JellyfinInputTest, TrackOfAnotherAccountDoesNotUseCurrentCredentials)
 TEST_F(JellyfinInputTest, MissingHostDecoderDoesNotRequestAudio)
 {
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
-    const QString path = trackPath(key(), u"track1"_s);
+    const QString path = trackPath(sourceKey(), u"track1"_s);
     AudioSource source;
     source.filepath = path;
     EXPECT_FALSE(decoder.init(source, Track{path}, AudioDecoder::None).has_value());
@@ -399,8 +400,8 @@ TEST_F(JellyfinInputTest, MissingHostDecoderDoesNotRequestAudio)
 
 TEST_F(JellyfinInputTest, ReaderSuppliesCoverFromCatalogImage)
 {
-    const QString path = trackPath(key(), u"track1"_s);
-    m_access->setImages(key(), {{u"track1"_s, CatalogImage{.itemId = u"album1"_s, .tag = u"tag1"_s}}});
+    const QString path = trackPath(sourceKey(), u"track1"_s);
+    m_access->setImages(sourceKey(), {{u"track1"_s, CatalogImage{.itemId = u"album1"_s, .tag = u"tag1"_s}}});
 
     Reader reader{m_access, m_remoteIoFixture.remoteIo, 5s};
     AudioSource source;
@@ -418,9 +419,53 @@ TEST_F(JellyfinInputTest, ReaderSuppliesCoverFromCatalogImage)
     EXPECT_TRUE(m_server.requestsForPath(u"/jf/Audio/track1/stream"_s).empty());
 }
 
+TEST_F(JellyfinInputTest, ReaderFollowsCoverRedirectWithinServerBasePath)
+{
+    const QUrl target = m_server.url(u"/jf/redirected-image"_s);
+    m_server.setHandler([target](const FakeRequest& request) {
+        if(request.path == "/jf/Items/album1/Images/Primary"_L1) {
+            return FakeJellyfinServer::redirect(target);
+        }
+        if(request.path == "/jf/redirected-image"_L1) {
+            return FakeJellyfinServer::bytes(request, "synthetic-image", false);
+        }
+        return FakeJellyfinServer::text(404, "Not found");
+    });
+    const QString path = trackPath(sourceKey(), u"track1"_s);
+    m_access->setImages(sourceKey(), {{u"track1"_s, CatalogImage{.itemId = u"album1"_s, .tag = u"tag1"_s}}});
+
+    Reader reader{m_access, m_remoteIoFixture.remoteIo, 5s};
+    AudioSource source;
+    source.filepath = path;
+    EXPECT_EQ(reader.readCover(source, Track{path}, Track::Cover::Front), QByteArray{"synthetic-image"});
+    const auto requests = m_server.requestsForPath(u"/jf/redirected-image"_s);
+    ASSERT_FALSE(requests.empty());
+    EXPECT_TRUE(requests.front().header("authorization").contains(TokenField));
+}
+
+TEST_F(JellyfinInputTest, ReaderDoesNotFollowCoverRedirectOutsideServerBasePath)
+{
+    const QUrl target = m_server.url(u"/other/leak"_s);
+    m_server.setHandler([target](const FakeRequest& request) {
+        if(request.path == "/jf/Items/album1/Images/Primary"_L1) {
+            return FakeJellyfinServer::redirect(target);
+        }
+        return FakeJellyfinServer::bytes(request, "leaked-image", false);
+    });
+    const QString path = trackPath(sourceKey(), u"track1"_s);
+    m_access->setImages(sourceKey(), {{u"track1"_s, CatalogImage{.itemId = u"album1"_s, .tag = u"tag1"_s}}});
+
+    Reader reader{m_access, m_remoteIoFixture.remoteIo, 5s};
+    AudioSource source;
+    source.filepath = path;
+    EXPECT_TRUE(reader.readCover(source, Track{path}, Track::Cover::Front).isEmpty());
+    EXPECT_FALSE(m_server.requestsForPath(u"/jf/Items/album1/Images/Primary"_s).empty());
+    EXPECT_TRUE(m_server.requestsForPath(u"/other/leak"_s).empty());
+}
+
 TEST_F(JellyfinInputTest, ReaderWithoutImageDoesNotRequest)
 {
-    const QString path = trackPath(key(), u"track2"_s);
+    const QString path = trackPath(sourceKey(), u"track2"_s);
     Reader reader{m_access, m_remoteIoFixture.remoteIo, 5s};
     AudioSource source;
     source.filepath = path;
@@ -456,7 +501,7 @@ TEST_F(JellyfinInputTest, AbortDuringInnerCreationDoesNotRaceOwnershipOrStartAud
     destructions->store(0);
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
     AudioSource source;
-    source.filepath = trackPath(key(), u"track1"_s);
+    source.filepath = trackPath(sourceKey(), u"track1"_s);
     armed->store(true);
     auto result = std::async(std::launch::async,
                              [&]() { return decoder.init(source, Track{source.filepath}, AudioDecoder::None); });
@@ -638,7 +683,7 @@ TEST_F(JellyfinInputTest, AbortInterruptsInnerInitialisationAndConcurrentFailure
     destructions->store(0);
     Decoder decoder{m_access, m_loader, m_remoteIoFixture.remoteIo, 5s};
     AudioSource source;
-    source.filepath = trackPath(key(), u"track1"_s);
+    source.filepath = trackPath(sourceKey(), u"track1"_s);
     auto result     = std::async(std::launch::async,
                                  [&]() { return decoder.init(source, Track{source.filepath}, AudioDecoder::None); });
     EXPECT_EQ(initialisation.wait_for(5s), std::future_status::ready);

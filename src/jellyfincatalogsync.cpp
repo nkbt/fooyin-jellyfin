@@ -415,7 +415,11 @@ void CatalogSync::handleSnapshotApplied(const QUuid& operation, int libraryId, b
     m_items.clear();
     m_playlists.clear();
 
+    const quint64 run = m_run;
     Q_EMIT playlistsReady(m_runAccess.sourceKey, playlists);
+    if(run != m_run) {
+        return;
+    }
     Q_EMIT finished(true, count == 1 ? tr("Synchronised 1 track.") : tr("Synchronised %1 tracks.").arg(count));
 }
 

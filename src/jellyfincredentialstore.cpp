@@ -20,6 +20,7 @@
 #include "jellyfincredentialstore.h"
 
 #include <QCoreApplication>
+
 #include <memory>
 
 #undef signals

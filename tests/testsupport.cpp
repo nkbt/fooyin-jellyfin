@@ -20,9 +20,9 @@
 #include "testsupport.h"
 
 #include <QTimer>
-#include <future>
 
 #include <algorithm>
+#include <future>
 #include <ranges>
 
 using namespace Qt::StringLiterals;
@@ -187,19 +187,19 @@ WriteRequest StubMusicLibrary::deleteTracks(const TrackList& /*tracks*/)
     return {};
 }
 
-std::optional<LibraryInfo> StubMusicLibrary::addExternalLibrary(const QString& uri, const QString& name)
+std::optional<LibraryInfo> StubMusicLibrary::addExternalLibrary(const QString& path, const QString& name)
 {
-    if(!Track::isVirtualPath(uri) || uri.endsWith(u'/')) {
+    if(!Track::isVirtualPath(path) || path.endsWith(u'/')) {
         return {};
     }
     for(const auto& library : m_libraries | std::views::values) {
-        if(library.path == uri) {
+        if(library.path == path) {
             return library;
         }
     }
     LibraryInfo library;
     library.name = name;
-    library.path = uri;
+    library.path = path;
     library.id   = static_cast<int>(m_libraries.size()) + 1;
     m_libraries.emplace(library.id, library);
     return library;

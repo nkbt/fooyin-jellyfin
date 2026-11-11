@@ -18,8 +18,10 @@
  */
 
 #include "jellyfincredentialstatestore.h"
+
 #include "jellyfinrequest.h"
 #include "jellyfintrack.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -30,6 +32,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QUuid>
+
 #include <filesystem>
 
 using namespace Qt::StringLiterals;

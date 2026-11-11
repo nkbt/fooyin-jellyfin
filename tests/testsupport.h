@@ -22,13 +22,13 @@
 #include "jellyfincredentialstore.h"
 
 #include <core/library/musiclibrary.h>
+#include <core/network/remoteioservice.h>
+#include <utils/settings/settingsmanager.h>
 
 #include <QNetworkAccessManager>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
-#include <core/network/remoteioservice.h>
-#include <utils/settings/settingsmanager.h>
 
 #include <map>
 #include <mutex>
@@ -71,7 +71,7 @@ public:
     void updateTrackStats(const Track& track, Track::Stats stats) override;
     WriteRequest removeUnavailbleTracks() override;
     WriteRequest deleteTracks(const TrackList& tracks) override;
-    std::optional<LibraryInfo> addExternalLibrary(const QString& uri, const QString& name) override;
+    std::optional<LibraryInfo> addExternalLibrary(const QString& path, const QString& name) override;
     void applyExternalLibrarySnapshot(const LibraryInfo& library, const TrackList& tracks,
                                       const QUuid& operation) override;
     void setExternalLibraryReadOnlyStats(const LibraryInfo& library, Track::Stats stats) override;

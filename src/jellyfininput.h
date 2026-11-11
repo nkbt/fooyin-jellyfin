@@ -21,10 +21,10 @@
 
 #include "jellyfinaccess.h"
 
-#include <atomic>
 #include <core/engine/audioinput.h>
 #include <core/network/remoteioservice.h>
 
+#include <atomic>
 #include <memory>
 
 namespace Fooyin {

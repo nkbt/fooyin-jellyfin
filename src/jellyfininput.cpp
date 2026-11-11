@@ -23,12 +23,13 @@
 #include "jellyfintrack.h"
 
 #include <core/engine/audioloader.h>
+#include <core/network/remotestreamdevice.h>
 
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QUrlQuery>
+
 #include <climits>
-#include <core/network/remotestreamdevice.h>
 
 Q_LOGGING_CATEGORY(JELLYFIN_INPUT, "fy.jellyfin.input")
 
@@ -132,9 +133,9 @@ std::optional<AudioFormat> Decoder::init(const AudioSource& source, const Track&
 {
     stop();
 
-    const QString key    = sourceKeyFromPath(source.filepath);
-    const QString itemId = itemIdFromPath(source.filepath);
-    const auto access    = m_access->accessForSource(key);
+    const QString sourceKey = sourceKeyFromPath(source.filepath);
+    const QString itemId    = itemIdFromPath(source.filepath);
+    const auto access       = m_access->accessForSource(sourceKey);
     if(!access) {
         qCWarning(JELLYFIN_INPUT) << "Jellyfin track is unavailable because its account is not signed in";
         return {};
@@ -169,7 +170,8 @@ std::optional<AudioFormat> Decoder::init(const AudioSource& source, const Track&
         stop();
         return {};
     }
-    const auto pending = m_remoteIo->prepareStream(apiRequest(url, access->authorization), access->sourceLifetime);
+    const auto pending
+        = m_remoteIo->prepareStream(apiRequest(url, access->authorization), access->serverUrl, access->sourceLifetime);
     if(!pending->waitForReady(m_timeout, abortToken()) || access->sourceLifetime.stop_requested()) {
         stop();
         return {};
@@ -288,12 +290,12 @@ QByteArray Reader::readCover(const AudioSource& source, const Track& /*track*/, 
         return {};
     }
 
-    const QString key = sourceKeyFromPath(source.filepath);
-    const auto access = m_access->accessForSource(key);
+    const QString sourceKey = sourceKeyFromPath(source.filepath);
+    const auto access       = m_access->accessForSource(sourceKey);
     if(!access) {
         return {};
     }
-    const auto image = m_access->image(key, itemIdFromPath(source.filepath));
+    const auto image = m_access->image(sourceKey, itemIdFromPath(source.filepath));
     if(!image) {
         return {};
     }
@@ -302,7 +304,8 @@ QByteArray Reader::readCover(const AudioSource& source, const Track& /*track*/, 
         return {};
     }
 
-    const auto pending = m_remoteIo->prepareStream(apiRequest(url, access->authorization), access->sourceLifetime);
+    const auto pending
+        = m_remoteIo->prepareStream(apiRequest(url, access->authorization), access->serverUrl, access->sourceLifetime);
     if(!pending->waitForReady(m_timeout, access->sourceLifetime)) {
         return {};
     }

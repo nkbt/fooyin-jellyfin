@@ -38,19 +38,20 @@ PlaylistMirror::PlaylistMirror(PlaylistHandler* playlistHandler, SettingsManager
     , m_settings{settings}
 { }
 
-void PlaylistMirror::apply(const QString& sourceKey, const std::vector<MirroredPlaylist>& playlists)
+bool PlaylistMirror::apply(const QString& sourceKey, const std::vector<MirroredPlaylist>& playlists)
 {
     for(const auto& mirrored : playlists) {
         if(std::cmp_not_equal(mirrored.tracks.size(), mirrored.playlistItemIds.size())) {
-            return;
+            return false;
         }
     }
     QVariantMap previous = m_settings->fileValue(settingsKey(sourceKey)).toMap();
     QVariantMap current;
+    bool complete{true};
 
     for(const auto& mirrored : playlists) {
-        const QVariantMap stored = previous.take(mirrored.playlistId).toMap();
-        Playlist* playlist       = m_playlistHandler->playlistByDbId(stored.value(u"nativePlaylistDbId"_s, -1).toInt());
+        const QVariantMap storedEntry = previous.take(mirrored.playlistId).toMap();
+        Playlist* playlist = m_playlistHandler->playlistByDbId(storedEntry.value(u"nativePlaylistDbId"_s, -1).toInt());
         if(playlist && playlist->sourceLibraryPath() != libraryUri(sourceKey)) {
             playlist = nullptr;
         }
@@ -64,23 +65,30 @@ void PlaylistMirror::apply(const QString& sourceKey, const std::vector<MirroredP
                                       .entryId         = UId{QUuid::createUuidV5(QUuid{}, identity)},
                                       .indexInPlaylist = static_cast<int>(index)});
         }
-        playlist = m_playlistHandler->applyExternalPlaylist(libraryUri(sourceKey), playlist ? playlist->id() : UId{},
-                                                            mirrored.name, playlistTracks);
-        if(!playlist) {
+        Playlist* applied = m_playlistHandler->applyExternalPlaylist(
+            libraryUri(sourceKey), playlist ? playlist->id() : UId{}, mirrored.name, playlistTracks);
+        if(!applied) {
+            complete = false;
+            if(playlist) {
+                current.insert(mirrored.playlistId, storedEntry);
+            }
             continue;
         }
 
         current.insert(mirrored.playlistId,
-                       QVariantMap{{u"nativePlaylistDbId"_s, playlist->dbId()}, {u"name"_s, mirrored.name}});
+                       QVariantMap{{u"nativePlaylistDbId"_s, applied->dbId()}, {u"name"_s, mirrored.name}});
     }
 
-    for(const auto& stale : std::as_const(previous)) {
+    for(const auto& [playlistId, stale] : std::as_const(previous).asKeyValueRange()) {
         const int nativePlaylistDbId = stale.toMap().value(u"nativePlaylistDbId"_s, -1).toInt();
-        if(Playlist* playlist = m_playlistHandler->playlistByDbId(nativePlaylistDbId)) {
-            m_playlistHandler->removeExternalPlaylist(libraryUri(sourceKey), playlist->id());
+        Playlist* playlist           = m_playlistHandler->playlistByDbId(nativePlaylistDbId);
+        if(playlist && !m_playlistHandler->removeExternalPlaylist(libraryUri(sourceKey), playlist->id())) {
+            complete = false;
+            current.insert(playlistId, stale);
         }
     }
 
     m_settings->fileSet(settingsKey(sourceKey), current);
+    return complete;
 }
 } // namespace Fooyin::Jellyfin

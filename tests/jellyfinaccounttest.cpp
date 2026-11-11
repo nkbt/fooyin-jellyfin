@@ -18,6 +18,7 @@
  */
 
 #include "jellyfinaccount.h"
+
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
 #include "jellyfincatalogsync.h"

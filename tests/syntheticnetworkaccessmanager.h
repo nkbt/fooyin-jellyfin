@@ -20,6 +20,7 @@
 #pragma once
 
 #include <QNetworkAccessManager>
+
 #include <atomic>
 
 namespace Fooyin::Jellyfin::Testing {

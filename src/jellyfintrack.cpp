@@ -100,11 +100,11 @@ QString sourceKeyFromPath(const QString& path)
 
 QString itemIdFromPath(const QString& path)
 {
-    const QString key = sourceKeyFromPath(path);
-    if(key.isEmpty()) {
+    const QString sourceKey = sourceKeyFromPath(path);
+    if(sourceKey.isEmpty()) {
         return {};
     }
-    const QString itemId = path.sliced(libraryUri(key).size() + 1);
+    const QString itemId = path.sliced(libraryUri(sourceKey).size() + 1);
     return isValidItemId(itemId) ? itemId : QString{};
 }
 

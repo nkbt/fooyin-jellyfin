@@ -19,13 +19,16 @@
 
 #include "jellyfincredentialstatestore.h"
 #include "jellyfintrack.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
-#include <filesystem>
+
 #include <gtest/gtest.h>
+
+#include <filesystem>
 
 using namespace Qt::StringLiterals;
 namespace Fooyin::Jellyfin::Testing {

@@ -18,8 +18,10 @@
  */
 
 #include "syntheticnetworkaccessmanager.h"
+
 #include <QNetworkReply>
 #include <QTimer>
+
 #include <cstring>
 
 using namespace Qt::StringLiterals;

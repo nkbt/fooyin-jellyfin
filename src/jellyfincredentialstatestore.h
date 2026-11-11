@@ -21,6 +21,7 @@
 
 #include <QJsonObject>
 #include <QString>
+
 #include <optional>
 
 namespace Fooyin::Jellyfin {

@@ -38,6 +38,7 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <QtConcurrent/QtConcurrentRun>
+
 #include <algorithm>
 #include <mutex>
 

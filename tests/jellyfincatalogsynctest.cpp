@@ -18,6 +18,7 @@
  */
 
 #include "jellyfincatalogsync.h"
+
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
 #include "jellyfintrack.h"
@@ -158,7 +159,7 @@ protected:
         return finished.first().at(0).toBool();
     }
 
-    [[nodiscard]] QString key() const
+    [[nodiscard]] QString sourceKey() const
     {
         return m_access->access()->sourceKey;
     }
@@ -200,7 +201,7 @@ TEST_F(JellyfinCatalogSyncTest, FetchesAllPagesWithMetadataOnly)
     const auto libraries = m_library.libraries();
     ASSERT_EQ(libraries.size(), 1U);
     const LibraryInfo library = libraries.begin()->second;
-    EXPECT_EQ(library.path, libraryUri(key()));
+    EXPECT_EQ(library.path, libraryUri(sourceKey()));
     EXPECT_EQ(library.name, u"Jellyfin: Synthetic User"_s);
     EXPECT_FALSE(library.path.contains(Token));
 
@@ -210,7 +211,7 @@ TEST_F(JellyfinCatalogSyncTest, FetchesAllPagesWithMetadataOnly)
         EXPECT_TRUE(track.filepath().startsWith("jellyfin://"_L1));
         EXPECT_FALSE(track.filepath().contains(Token));
         EXPECT_FALSE(track.filepath().contains("127.0.0.1"_L1));
-        EXPECT_EQ(sourceKeyFromPath(track.filepath()), key());
+        EXPECT_EQ(sourceKeyFromPath(track.filepath()), sourceKey());
         EXPECT_EQ(track.duration(), 180000U);
     }
 }
@@ -220,7 +221,7 @@ TEST_F(JellyfinCatalogSyncTest, ImportsLovedAndReadOnlyPlaylistsWithImages)
     QSignalSpy playlistsReady{&m_sync, &CatalogSync::playlistsReady};
     ASSERT_TRUE(runSync(nullptr));
     ASSERT_EQ(playlistsReady.size(), 1);
-    EXPECT_EQ(playlistsReady.first().at(0).toString(), key());
+    EXPECT_EQ(playlistsReady.first().at(0).toString(), sourceKey());
 
     const auto playlists = playlistsReady.first().at(1).value<std::vector<MirroredPlaylist>>();
     ASSERT_EQ(playlists.size(), 1U);
@@ -244,7 +245,7 @@ TEST_F(JellyfinCatalogSyncTest, ImportsLovedAndReadOnlyPlaylistsWithImages)
         EXPECT_EQ(request.method, "GET");
     }
 
-    const auto image = m_access->image(key(), u"track1"_s);
+    const auto image = m_access->image(sourceKey(), u"track1"_s);
     ASSERT_TRUE(image.has_value());
     EXPECT_EQ(image->itemId, u"album1"_s);
     EXPECT_EQ(image->tag, u"tag1"_s);
@@ -326,6 +327,17 @@ TEST_F(JellyfinCatalogSyncTest, HostSnapshotFailureKeepsPreviousCatalog)
     EXPECT_TRUE(playlistsReady.isEmpty());
 }
 
+TEST_F(JellyfinCatalogSyncTest, PlaylistStorageFailureReportsIncompleteSynchronisation)
+{
+    QObject::connect(&m_sync, &CatalogSync::playlistsReady, &m_sync,
+                     [this]() { m_sync.fail(u"Synthetic playlist failure"_s); });
+    QList<QVariantList> results;
+    EXPECT_FALSE(runSync(&results));
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_EQ(results.first().at(1).toString(), u"Synthetic playlist failure"_s);
+    EXPECT_FALSE(m_sync.isRunning());
+}
+
 TEST_F(JellyfinCatalogSyncTest, InvalidPageIsRejected)
 {
     m_server.setHandler([](const FakeRequest& /*request*/) {
@@ -367,13 +379,13 @@ TEST_F(JellyfinCatalogSyncTest, CancelStopsTheRunWithoutApplying)
 TEST_F(JellyfinCatalogSyncTest, AccountsUseSeparateLibraries)
 {
     ASSERT_TRUE(runSync(nullptr));
-    const QString firstKey = key();
+    const QString firstSourceKey = sourceKey();
 
     m_access->setAccess(connectionFor(m_server.url(u"/jf"_s), u"user2"_s), Token);
     ASSERT_TRUE(runSync(nullptr));
-    const QString secondKey = key();
+    const QString secondSourceKey = sourceKey();
 
-    EXPECT_NE(firstKey, secondKey);
+    EXPECT_NE(firstSourceKey, secondSourceKey);
     const auto libraries = m_library.libraries();
     ASSERT_EQ(libraries.size(), 2U);
     for(const auto& [id, library] : libraries) {
@@ -381,8 +393,8 @@ TEST_F(JellyfinCatalogSyncTest, AccountsUseSeparateLibraries)
             EXPECT_EQ(libraryUri(sourceKeyFromPath(track.filepath())), library.path);
         }
     }
-    EXPECT_FALSE(m_access->image(firstKey, u"track1"_s).has_value());
-    EXPECT_TRUE(m_access->image(secondKey, u"track1"_s).has_value());
+    EXPECT_FALSE(m_access->image(firstSourceKey, u"track1"_s).has_value());
+    EXPECT_TRUE(m_access->image(secondSourceKey, u"track1"_s).has_value());
 }
 
 TEST_F(JellyfinCatalogSyncTest, StartWithoutAccessFails)

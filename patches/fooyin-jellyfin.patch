@@ -1,5 +1,4 @@
 diff --git a/include/core/engine/audioinput.h b/include/core/engine/audioinput.h
-index 7c4f9beb26d9de29cd2a79a5af850b133a546eb8..6ac83b70b4f7d69fa19cb7d3e68a58ec576608ac 100644
 --- a/include/core/engine/audioinput.h
 +++ b/include/core/engine/audioinput.h
 @@ -221,6 +221,7 @@ public:
@@ -11,7 +10,6 @@ index 7c4f9beb26d9de29cd2a79a5af850b133a546eb8..6ac83b70b4f7d69fa19cb7d3e68a58ec
       * Returns whether this decoder may read while another decoder instance is active.
       * Base implementation returns true.
 diff --git a/include/core/engine/enginecontroller.h b/include/core/engine/enginecontroller.h
-index 8942ee39ddb67250d7ce776bd85ecc6e1145b88f..b9b2c986223fad2568c459997581661dce6e6f6f 100644
 --- a/include/core/engine/enginecontroller.h
 +++ b/include/core/engine/enginecontroller.h
 @@ -116,6 +116,9 @@ Q_SIGNALS:
@@ -25,7 +23,6 @@ index 8942ee39ddb67250d7ce776bd85ecc6e1145b88f..b9b2c986223fad2568c459997581661d
  };
  } // namespace Fooyin
 diff --git a/include/core/engine/enginedefs.h b/include/core/engine/enginedefs.h
-index 2ca9b6847aa00af3ac56a7ee2e0dba5f9da3a519..a9964c3a153985a1061869f685c02b9d3426bade 100644
 --- a/include/core/engine/enginedefs.h
 +++ b/include/core/engine/enginedefs.h
 @@ -108,6 +108,20 @@ struct TrackCommitContext
@@ -58,7 +55,6 @@ index 2ca9b6847aa00af3ac56a7ee2e0dba5f9da3a519..a9964c3a153985a1061869f685c02b9d
  Q_DECLARE_METATYPE(Fooyin::Engine::AnalysisDataTypes)
  Q_DECLARE_METATYPE(Fooyin::LevelFrame)
 diff --git a/include/core/library/musiclibrary.h b/include/core/library/musiclibrary.h
-index 751d825f9b359342197cae00eea23ee77ddaafcd..e7412dad8538ded036a8357fac62e82d3f33b3f5 100644
 --- a/include/core/library/musiclibrary.h
 +++ b/include/core/library/musiclibrary.h
 @@ -27,6 +27,7 @@
@@ -110,7 +106,6 @@ index 751d825f9b359342197cae00eea23ee77ddaafcd..e7412dad8538ded036a8357fac62e82d
      void visibleLibraryTracksChanged();
  
 diff --git a/include/core/network/remoteioservice.h b/include/core/network/remoteioservice.h
-index 381f1a4d5ca8d51c4d397595ce5ee32106630b9a..c8d57218efdf944e831152d2bdb7aeae8488586c 100644
 --- a/include/core/network/remoteioservice.h
 +++ b/include/core/network/remoteioservice.h
 @@ -32,6 +32,7 @@
@@ -130,12 +125,13 @@ index 381f1a4d5ca8d51c4d397595ce5ee32106630b9a..c8d57218efdf944e831152d2bdb7aeae
      [[nodiscard]] bool isReady() const;
      [[nodiscard]] QString errorString() const;
  
-@@ -128,12 +129,16 @@ public:
+@@ -128,12 +129,17 @@ public:
  
      //! Begin asynchronous preparation using the configured remote open timeout.
      [[nodiscard]] std::shared_ptr<PendingRemoteStream> prepareStream(const QUrl& url) const;
-+    [[nodiscard]] std::shared_ptr<PendingRemoteStream> prepareStream(const QNetworkRequest& request,
-+                                                                     std::stop_token sourceLifetime) const;
++    //! Begin preparation of an authenticated request. Redirects must stay within @p redirectScope.
++    [[nodiscard]] std::shared_ptr<PendingRemoteStream>
++    prepareStream(const QNetworkRequest& request, const QUrl& redirectScope, std::stop_token sourceLifetime) const;
  
      [[nodiscard]] std::shared_ptr<RemoteDownloadHandle>
      download(const QUrl& url, QObject* context, DownloadCallback callback,
@@ -148,7 +144,6 @@ index 381f1a4d5ca8d51c4d397595ce5ee32106630b9a..c8d57218efdf944e831152d2bdb7aeae
      SettingsManager* m_settings;
  };
 diff --git a/include/core/playlist/playlist.h b/include/core/playlist/playlist.h
-index fd2be61cd07f7d718da0bd4b7b72805c74f01d66..8f17e3f586780dccbfd41c778ee3a3fb75fd6561 100644
 --- a/include/core/playlist/playlist.h
 +++ b/include/core/playlist/playlist.h
 @@ -139,6 +139,7 @@ public:
@@ -160,20 +155,21 @@ index fd2be61cd07f7d718da0bd4b7b72805c74f01d66..8f17e3f586780dccbfd41c778ee3a3fb
      [[nodiscard]] QString query() const;
      /** Returns the optional sort pattern used to order this autoplaylist. */
 diff --git a/include/core/playlist/playlisthandler.h b/include/core/playlist/playlisthandler.h
-index b72f37b59a21fd36091b33c140b6dcf190691529..8c00aaba80a943937de63ca670e57e9f0abeacbb 100644
 --- a/include/core/playlist/playlisthandler.h
 +++ b/include/core/playlist/playlisthandler.h
-@@ -127,6 +127,9 @@ public:
+@@ -127,6 +127,11 @@ public:
      /** Advances and returns a track relative to the current index in the active playlist. */
      [[nodiscard]] PlaylistTrack advanceRelativeTrack(Playlist::PlayModes mode, int delta = 1);
  
++    /** Stores the source playlist atomically. Returns nullptr when nothing is stored. */
 +    Playlist* applyExternalPlaylist(const QString& sourceLibraryPath, const UId& id, const QString& name,
 +                                    const PlaylistTrackList& playlistTracks);
-+    void removeExternalPlaylist(const QString& sourceLibraryPath, const UId& id);
++    /** Returns false when the source playlist with @p id remains stored. */
++    bool removeExternalPlaylist(const QString& sourceLibraryPath, const UId& id);
      void renamePlaylist(const UId& id, const QString& name);
      /** Enables or disables changes to the contents of the playlist with @p id. */
      void setPlaylistLocked(const UId& id, bool locked);
-@@ -141,6 +144,7 @@ public:
+@@ -141,6 +146,7 @@ public:
      [[nodiscard]] Playlist* activePlaylist() const;
  
      [[nodiscard]] int playlistCount() const;
@@ -182,7 +178,6 @@ index b72f37b59a21fd36091b33c140b6dcf190691529..8c00aaba80a943937de63ca670e57e9f
      void prepareUpcomingTrack();
  
 diff --git a/include/core/track.h b/include/core/track.h
-index a308bc121b58209d5205ee5dfaa586f35c1866d6..7ff727ef372a9aa702ad4d9303ed8be7c28262ad 100644
 --- a/include/core/track.h
 +++ b/include/core/track.h
 @@ -288,6 +288,11 @@ public:
@@ -211,7 +206,6 @@ index a308bc121b58209d5205ee5dfaa586f35c1866d6..7ff727ef372a9aa702ad4d9303ed8be7
      void normaliseExtraProperties();
      void clearExtraProperties();
 diff --git a/src/core/database/trackdatabase.cpp b/src/core/database/trackdatabase.cpp
-index 684c7d4639e1a91eaf1cf997750f96a5aa0baf88..fab829f4ab597841ffd20ad02114879a6e12a62f 100644
 --- a/src/core/database/trackdatabase.cpp
 +++ b/src/core/database/trackdatabase.cpp
 @@ -181,42 +181,113 @@ bool TrackDatabase::storeTracks(TrackList& tracks)
@@ -409,7 +403,6 @@ index 684c7d4639e1a91eaf1cf997750f96a5aa0baf88..fab829f4ab597841ffd20ad02114879a
          }
      }
 diff --git a/src/core/database/trackdatabase.h b/src/core/database/trackdatabase.h
-index 6d6e78e81ad06a2db8e5079fad4ff6d9c006e885..e960e491914b7c6c36bab7464f94dde1a56b5fe9 100644
 --- a/src/core/database/trackdatabase.h
 +++ b/src/core/database/trackdatabase.h
 @@ -21,6 +21,7 @@
@@ -444,7 +437,6 @@ index 6d6e78e81ad06a2db8e5079fad4ff6d9c006e885..e960e491914b7c6c36bab7464f94dde1
  
      struct StoredTrackStats
 diff --git a/src/core/engine/audioengine.cpp b/src/core/engine/audioengine.cpp
-index 5f3f270e148300c0e2f575b521bc8da2173378ac..a7fa2c69da201170a3faa3c4b4af28bae66095e8 100644
 --- a/src/core/engine/audioengine.cpp
 +++ b/src/core/engine/audioengine.cpp
 @@ -397,6 +397,11 @@ AudioEngine::AudioEngine(std::shared_ptr<AudioLoader> audioLoader, SettingsManag
@@ -640,7 +632,6 @@ index 5f3f270e148300c0e2f575b521bc8da2173378ac..a7fa2c69da201170a3faa3c4b4af28ba
      clearAutoBoundaryFadeState(true);
      clearPendingAnalysisData();
 diff --git a/src/core/engine/audioengine.h b/src/core/engine/audioengine.h
-index 36a28e728a4dae12e616e69414c275c73f92655d..c34142da7b23847e5c3f81758b4db742688b1ffc 100644
 --- a/src/core/engine/audioengine.h
 +++ b/src/core/engine/audioengine.h
 @@ -215,6 +215,9 @@ Q_SIGNALS:
@@ -675,7 +666,6 @@ index 36a28e728a4dae12e616e69414c275c73f92655d..c34142da7b23847e5c3f81758b4db742
      uint64_t m_currentTrackItemId{0};
      Track m_lastEndedTrack;
 diff --git a/src/core/engine/audioinput.cpp b/src/core/engine/audioinput.cpp
-index a68505f6f1b335e460ebe88fedef08b9379dd1ac..87c70c8a0725f9774f044324c778041ab657d8e8 100644
 --- a/src/core/engine/audioinput.cpp
 +++ b/src/core/engine/audioinput.cpp
 @@ -119,6 +119,11 @@ int AudioDecoder::bitrate() const
@@ -691,7 +681,6 @@ index a68505f6f1b335e460ebe88fedef08b9379dd1ac..87c70c8a0725f9774f044324c778041a
  
  void AudioDecoder::requestAbort()
 diff --git a/src/core/engine/decode/decodercontext.cpp b/src/core/engine/decode/decodercontext.cpp
-index 0259b169ef2d561f41ba76c6be81dedf326d5865..a1b7f5c6e4be707b60901a0841053eeb445585d6 100644
 --- a/src/core/engine/decode/decodercontext.cpp
 +++ b/src/core/engine/decode/decodercontext.cpp
 @@ -136,6 +136,11 @@ bool DecoderContext::isSeekable() const
@@ -707,7 +696,6 @@ index 0259b169ef2d561f41ba76c6be81dedf326d5865..a1b7f5c6e4be707b60901a0841053eeb
  {
      return !m_decoder || m_decoder->allowsConcurrentDecoding();
 diff --git a/src/core/engine/decode/decodercontext.h b/src/core/engine/decode/decodercontext.h
-index 55143ec6c236c1eeb4ac5d734a68b09ad7dd6364..42d4728a0490ed2a4fea3cf95f7c39d531bf00ef 100644
 --- a/src/core/engine/decode/decodercontext.h
 +++ b/src/core/engine/decode/decodercontext.h
 @@ -62,6 +62,7 @@ public:
@@ -719,7 +707,6 @@ index 55143ec6c236c1eeb4ac5d734a68b09ad7dd6364..42d4728a0490ed2a4fea3cf95f7c39d5
      [[nodiscard]] int playbackPrebufferMs() const;
      [[nodiscard]] AudioDecoder::RepeatHandling repeatHandling() const;
 diff --git a/src/core/engine/decode/decodingcontroller.cpp b/src/core/engine/decode/decodingcontroller.cpp
-index ec7f09201c570f297a63fd214a0fef0e9a6d7653..eedc0de71406c6766fa8354460cfdcbfed188c9a 100644
 --- a/src/core/engine/decode/decodingcontroller.cpp
 +++ b/src/core/engine/decode/decodingcontroller.cpp
 @@ -210,6 +210,7 @@ public:
@@ -751,7 +738,6 @@ index ec7f09201c570f297a63fd214a0fef0e9a6d7653..eedc0de71406c6766fa8354460cfdcbf
  {
      return p->currentSnapshot().allowsConcurrentDecoding;
 diff --git a/src/core/engine/decode/decodingcontroller.h b/src/core/engine/decode/decodingcontroller.h
-index 7377c65ce0ba0083101b1da1d509577ffb1d23c2..8617ca781015532bd71db9924bdd621860a031de 100644
 --- a/src/core/engine/decode/decodingcontroller.h
 +++ b/src/core/engine/decode/decodingcontroller.h
 @@ -84,6 +84,7 @@ public:
@@ -763,7 +749,6 @@ index 7377c65ce0ba0083101b1da1d509577ffb1d23c2..8617ca781015532bd71db9924bdd6218
      [[nodiscard]] int playbackPrebufferMs() const;
      [[nodiscard]] AudioDecoder::RepeatHandling repeatHandling() const;
 diff --git a/src/core/engine/enginehandler.cpp b/src/core/engine/enginehandler.cpp
-index c6fbf3df60fc725738e39f5d2daabd4f583746ee..9af5954c379b1f9e2393636bf374aab4d9477d45 100644
 --- a/src/core/engine/enginehandler.cpp
 +++ b/src/core/engine/enginehandler.cpp
 @@ -108,6 +108,11 @@ EngineHandler::EngineHandler(std::shared_ptr<AudioLoader> audioLoader, PlayerCon
@@ -779,7 +764,6 @@ index c6fbf3df60fc725738e39f5d2daabd4f583746ee..9af5954c379b1f9e2393636bf374aab4
      QObject::connect(m_engine, &AudioEngine::positionContextChanged, this, &EngineHandler::handlePositionContext);
      QObject::connect(m_engine, &AudioEngine::positionChangedWithContext, this, &EngineHandler::handlePositionSample);
 diff --git a/src/core/engine/input/carrierdecoder.cpp b/src/core/engine/input/carrierdecoder.cpp
-index 11645a7edc77d5dd6dd3b419338c86eb7a237ae3..c432245f26e88235c38225f5ba0da53c2eaf423a 100644
 --- a/src/core/engine/input/carrierdecoder.cpp
 +++ b/src/core/engine/input/carrierdecoder.cpp
 @@ -243,6 +243,11 @@ bool CarrierDecoder::isSeekable() const
@@ -795,7 +779,6 @@ index 11645a7edc77d5dd6dd3b419338c86eb7a237ae3..c432245f26e88235c38225f5ba0da53c
  {
      return p->primary->allowsConcurrentDecoding();
 diff --git a/src/core/engine/input/carrierdecoder.h b/src/core/engine/input/carrierdecoder.h
-index 105e2e02eaf570cc498db28304d9c233e42d2a10..cbc5b3915f13bfe7b4fa61bab080715672b7de80 100644
 --- a/src/core/engine/input/carrierdecoder.h
 +++ b/src/core/engine/input/carrierdecoder.h
 @@ -38,6 +38,7 @@ public:
@@ -807,7 +790,6 @@ index 105e2e02eaf570cc498db28304d9c233e42d2a10..cbc5b3915f13bfe7b4fa61bab0807156
      [[nodiscard]] int playbackPrebufferMs() const override;
      [[nodiscard]] QStringList takeWarnings() override;
 diff --git a/src/core/engine/pipeline/audiopipeline.cpp b/src/core/engine/pipeline/audiopipeline.cpp
-index a088f7656e04bd16ddf92d55cd66385de51995fc..d013f533803dcb8c3dd1ab09f90d78b2b7c7f664 100644
 --- a/src/core/engine/pipeline/audiopipeline.cpp
 +++ b/src/core/engine/pipeline/audiopipeline.cpp
 @@ -1085,6 +1085,11 @@ void AudioPipeline::setSignalWakeTarget(QObject* target, int wakeEventType)
@@ -837,7 +819,6 @@ index a088f7656e04bd16ddf92d55cd66385de51995fc..d013f533803dcb8c3dd1ab09f90d78b2
              m_timelineUnit.setCycleRenderedSegment({
                  .valid        = true,
 diff --git a/src/core/engine/pipeline/audiopipeline.h b/src/core/engine/pipeline/audiopipeline.h
-index 9077e7b758d9e1500727ab0e6b99a5f4258bfbe3..0673896e8cf4bd3ad77642c2ace4bf336879a06f 100644
 --- a/src/core/engine/pipeline/audiopipeline.h
 +++ b/src/core/engine/pipeline/audiopipeline.h
 @@ -297,6 +297,7 @@ public:
@@ -859,7 +840,6 @@ index 9077e7b758d9e1500727ab0e6b99a5f4258bfbe3..0673896e8cf4bd3ad77642c2ace4bf33
      void markPendingSignal(PendingSignal signal);
  
 diff --git a/src/core/library/librarythreadhandler.cpp b/src/core/library/librarythreadhandler.cpp
-index 2ad16df2ad7fa6c6c6af03c0a23da18a539b7b26..4c8e626d3236385763bba778545baeb6d53167f9 100644
 --- a/src/core/library/librarythreadhandler.cpp
 +++ b/src/core/library/librarythreadhandler.cpp
 @@ -1354,6 +1354,25 @@ void LibraryThreadHandler::cleanupTracks()
@@ -889,7 +869,6 @@ index 2ad16df2ad7fa6c6c6af03c0a23da18a539b7b26..4c8e626d3236385763bba778545baeb6
  {
      if(p->m_scanRequests.empty()) {
 diff --git a/src/core/library/librarythreadhandler.h b/src/core/library/librarythreadhandler.h
-index 31716e3397d4a81c959ae435ab01f11117adbc23..1deb0eb0ff3eed42932c188df5aaffc993ccccf7 100644
 --- a/src/core/library/librarythreadhandler.h
 +++ b/src/core/library/librarythreadhandler.h
 @@ -82,6 +82,14 @@ public:
@@ -908,7 +887,6 @@ index 31716e3397d4a81c959ae435ab01f11117adbc23..1deb0eb0ff3eed42932c188df5aaffc9
  Q_SIGNALS:
      void progressChanged(const Fooyin::ScanProgress& progress);
 diff --git a/src/core/library/musiclibrary.cpp b/src/core/library/musiclibrary.cpp
-index 32e66a0a8042b6a016457b8fa84e58a5908c776d..0f8be128f7d7b7113e9237e4fe07274386214c02 100644
 --- a/src/core/library/musiclibrary.cpp
 +++ b/src/core/library/musiclibrary.cpp
 @@ -53,7 +53,7 @@ public:
@@ -972,7 +950,6 @@ index 32e66a0a8042b6a016457b8fa84e58a5908c776d..0f8be128f7d7b7113e9237e4fe072743
  {
      return !p->m_activeLibraryFilters.empty();
 diff --git a/src/core/library/trackdatabasemanager.cpp b/src/core/library/trackdatabasemanager.cpp
-index 726c5fc5de94deb39dac814d1819f0020740b156..422ad9547a4a6c4203fdecef31a0a4f0f98ee294 100644
 --- a/src/core/library/trackdatabasemanager.cpp
 +++ b/src/core/library/trackdatabasemanager.cpp
 @@ -143,6 +143,27 @@ void TrackDatabaseManager::getAllTracks(std::stop_token workerToken)
@@ -1004,7 +981,6 @@ index 726c5fc5de94deb39dac814d1819f0020740b156..422ad9547a4a6c4203fdecef31a0a4f0
  {
      if(!startWork(workerToken)) {
 diff --git a/src/core/library/trackdatabasemanager.h b/src/core/library/trackdatabasemanager.h
-index 1f2e46aef8462ce12271f0cc2043c28be58484d4..f511f79ee1d26f3616210b22cf448b847c8a7359 100644
 --- a/src/core/library/trackdatabasemanager.h
 +++ b/src/core/library/trackdatabasemanager.h
 @@ -27,7 +27,9 @@
@@ -1032,7 +1008,6 @@ index 1f2e46aef8462ce12271f0cc2043c28be58484d4..f511f79ee1d26f3616210b22cf448b84
  Q_SIGNALS:
      void gotTracks(const Fooyin::TrackList& tracks);
 diff --git a/src/core/library/unifiedmusiclibrary.cpp b/src/core/library/unifiedmusiclibrary.cpp
-index e8f5f2c0edb0fa95474e580c7c515128897ca5b2..85cd58a1de9d7ba72e5eacd7ed790c3944f6f3af 100644
 --- a/src/core/library/unifiedmusiclibrary.cpp
 +++ b/src/core/library/unifiedmusiclibrary.cpp
 @@ -19,6 +19,7 @@
@@ -1406,7 +1381,6 @@ index e8f5f2c0edb0fa95474e580c7c515128897ca5b2..85cd58a1de9d7ba72e5eacd7ed790c39
  
  void UnifiedMusicLibrary::updateTrackStats(const Track& track, Track::Stats stats)
 diff --git a/src/core/library/unifiedmusiclibrary.h b/src/core/library/unifiedmusiclibrary.h
-index bccad519ccb3544241309c6fdbd8ce05b58c5bcc..aaa22cff6b834ab3e89282e5fb09bb7010df525a 100644
 --- a/src/core/library/unifiedmusiclibrary.h
 +++ b/src/core/library/unifiedmusiclibrary.h
 @@ -84,6 +84,12 @@ public:
@@ -1423,19 +1397,19 @@ index bccad519ccb3544241309c6fdbd8ce05b58c5bcc..aaa22cff6b834ab3e89282e5fb09bb70
  private:
      std::unique_ptr<UnifiedMusicLibraryPrivate> p;
 diff --git a/src/core/network/networkstreamdevice.cpp b/src/core/network/networkstreamdevice.cpp
-index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9b8e8b1b6 100644
 --- a/src/core/network/networkstreamdevice.cpp
 +++ b/src/core/network/networkstreamdevice.cpp
-@@ -83,6 +83,8 @@ struct IcyMetadataState
+@@ -83,6 +83,9 @@ struct IcyMetadataState
  struct NetworkStreamDeviceState
  {
      QPointer<QNetworkReply> reply;
 +    std::optional<QNetworkRequest> request;
++    QUrl redirectScope;
 +    std::stop_token sourceLifetime;
      std::mutex mutex;
      std::condition_variable_any ready;
      QString error;
-@@ -107,7 +109,7 @@ struct NetworkStreamDeviceState
+@@ -107,7 +110,7 @@ struct NetworkStreamDeviceState
      {
          error.clear();
          finished              = false;
@@ -1444,7 +1418,33 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
          contentLength         = -1;
          modifiedTime          = 0;
          requestOffset         = 0;
-@@ -504,7 +506,8 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
+@@ -125,6 +128,25 @@ struct NetworkStreamDeviceState
+ };
+ 
+ namespace {
++bool isWithinRedirectScope(const QUrl& redirectScope, const QUrl& target)
++{
++    if(target.scheme().compare(redirectScope.scheme(), Qt::CaseInsensitive) != 0
++       || target.host().compare(redirectScope.host(), Qt::CaseInsensitive) != 0 || !target.userInfo().isEmpty()) {
++        return false;
++    }
++    const int defaultPort = redirectScope.scheme().compare("https"_L1, Qt::CaseInsensitive) == 0 ? 443 : 80;
++    if(target.port(defaultPort) != redirectScope.port(defaultPort)) {
++        return false;
++    }
++
++    QString basePath = redirectScope.path();
++    while(basePath.endsWith(u'/')) {
++        basePath.chop(1);
++    }
++    const QString path = target.adjusted(QUrl::NormalizePathSegments).path();
++    return basePath.isEmpty() || path == basePath || path.startsWith(basePath + u'/');
++}
++
+ void notifyNetworkStreamState(const std::shared_ptr<NetworkStreamDeviceState>& state)
+ {
+     state->ready.notify_all();
+@@ -504,7 +526,8 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
  {
      {
          const std::scoped_lock lock{state->mutex};
@@ -1454,7 +1454,7 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
              return;
          }
      }
-@@ -512,6 +515,10 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
+@@ -512,6 +535,10 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
      QNetworkRequest req = makeNetworkRequest(url, NetworkRequestOption::AlwaysNetwork | NetworkRequestOption::AcceptAny
                                                        | NetworkRequestOption::IcyMetadata
                                                        | NetworkRequestOption::UserVerifiedRedirects);
@@ -1465,7 +1465,7 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
      req.setRawHeader("Accept-Encoding", "identity");
      if(offset >= 0) {
          req.setRawHeader("Range", "bytes=" + QByteArray::number(offset) + '-');
-@@ -522,7 +529,8 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
+@@ -522,7 +549,8 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
  
      {
          const std::scoped_lock lock{state->mutex};
@@ -1475,7 +1475,7 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
              reply->abort();
              reply->deleteLater();
              return;
-@@ -539,13 +547,31 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
+@@ -539,13 +567,25 @@ void startNetworkStreamRequestOnNetworkThread(const std::shared_ptr<QNetworkAcce
  
      // Reply signals may arrive after the device is closed from the decode thread
      // Capture only shared state here; never capture the device object
@@ -1486,14 +1486,8 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
              const std::scoped_lock lock{state->mutex};
 -            if(reply == state->reply && !state->aborted) {
 -                reply->redirectAllowed();
-+            const QUrl origin        = state->request ? state->request->url() : QUrl{};
-+            const auto effectivePort = [](const QUrl& value) {
-+                return value.port(value.scheme() == "https"_L1 ? 443 : 80);
-+            };
 +            allowed = reply == state->reply && !state->aborted && !state->sourceLifetime.stop_requested()
-+                   && (!state->request
-+                       || (origin.scheme() == target.scheme() && origin.host() == target.host()
-+                           && effectivePort(origin) == effectivePort(target)));
++                   && (!state->request || isWithinRedirectScope(state->redirectScope, target));
 +            if(!allowed && reply == state->reply) {
 +                state->aborted  = true;
 +                state->finished = true;
@@ -1510,15 +1504,17 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
      });
      QObject::connect(reply, &QNetworkReply::metaDataChanged, reply, [state, reply]() {
          {
-@@ -609,6 +635,47 @@ NetworkStreamDevice::NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager>
+@@ -609,6 +649,49 @@ NetworkStreamDevice::NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager>
      m_state->streamBuffer.maxBytes = StreamUtils::clampedBufferBytes(maxBufferedBytes);
  }
  
 +NetworkStreamDevice::NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager> network, QNetworkRequest request,
-+                                         qsizetype maxBufferedBytes, std::stop_token sourceLifetime, QObject* parent)
++                                         QUrl redirectScope, qsizetype maxBufferedBytes, std::stop_token sourceLifetime,
++                                         QObject* parent)
 +    : NetworkStreamDevice{std::move(network), request.url(), maxBufferedBytes, parent}
 +{
 +    m_state->request        = std::move(request);
++    m_state->redirectScope  = std::move(redirectScope);
 +    m_state->sourceLifetime = sourceLifetime;
 +    m_sourceCancellation    = std::make_unique<std::stop_callback<std::function<void()>>>(
 +        sourceLifetime, [weakState = std::weak_ptr{m_state}, network = m_network]() {
@@ -1558,7 +1554,7 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
  NetworkStreamDevice::~NetworkStreamDevice()
  {
      NetworkStreamDevice::close();
-@@ -703,10 +770,10 @@ void NetworkStreamDevice::setOpenCallback(std::function<void(QString)> callback)
+@@ -703,10 +786,10 @@ void NetworkStreamDevice::setOpenCallback(std::function<void(QString)> callback)
  bool NetworkStreamDevice::open(OpenMode mode)
  {
      if(isOpen()) {
@@ -1571,7 +1567,7 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
          setErrorString(u"Invalid network stream."_s);
          return false;
      }
-@@ -877,6 +944,11 @@ qint64 NetworkStreamDevice::readData(char* data, qint64 maxSize)
+@@ -877,6 +960,11 @@ qint64 NetworkStreamDevice::readData(char* data, qint64 maxSize)
          hasData = m_state->ready.wait(lock, cancellationToken, hasReadableState);
      }
  
@@ -1584,7 +1580,6 @@ index 1c42dfa2dbd95d54664eec474944c3cd1cb4b2b7..a7c1674d18e934bb250f4597962a91b9
          return -1;
      }
 diff --git a/src/core/network/networkstreamdevice.h b/src/core/network/networkstreamdevice.h
-index 205675ae29babb44f473e2b159b65cf85bed1a54..a09f577f595191939bd4e37bd9a9e58fb702612f 100644
 --- a/src/core/network/networkstreamdevice.h
 +++ b/src/core/network/networkstreamdevice.h
 @@ -25,7 +25,9 @@
@@ -1597,16 +1592,17 @@ index 205675ae29babb44f473e2b159b65cf85bed1a54..a09f577f595191939bd4e37bd9a9e58f
  
  #include <functional>
  #include <memory>
-@@ -42,6 +44,8 @@ class FYCORE_EXPORT NetworkStreamDevice : public QIODevice,
+@@ -42,6 +44,9 @@ class FYCORE_EXPORT NetworkStreamDevice : public QIODevice,
  public:
      NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager> network, QUrl url, qsizetype maxBufferedBytes,
                          QObject* parent = nullptr);
-+    NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager> network, QNetworkRequest request,
++    //! Redirects of the request must stay within the scheme, host, port and path of @p redirectScope.
++    NetworkStreamDevice(std::shared_ptr<QNetworkAccessManager> network, QNetworkRequest request, QUrl redirectScope,
 +                        qsizetype maxBufferedBytes, std::stop_token sourceLifetime, QObject* parent);
      ~NetworkStreamDevice() override;
  
      [[nodiscard]] bool isSequential() const override;
-@@ -72,5 +76,6 @@ private:
+@@ -72,5 +77,6 @@ private:
  
      QUrl m_url;
      std::shared_ptr<NetworkStreamDeviceState> m_state;
@@ -1614,7 +1610,6 @@ index 205675ae29babb44f473e2b159b65cf85bed1a54..a09f577f595191939bd4e37bd9a9e58f
  };
  } // namespace Fooyin
 diff --git a/src/core/network/remoteioservice.cpp b/src/core/network/remoteioservice.cpp
-index cc44e07568f1806a2ac7201c5b030f50e9f5ea64..daadb744f5957a93941718466367af5bc22f4cbb 100644
 --- a/src/core/network/remoteioservice.cpp
 +++ b/src/core/network/remoteioservice.cpp
 @@ -53,6 +53,8 @@ struct PendingRemoteStreamState
@@ -1683,7 +1678,7 @@ index cc44e07568f1806a2ac7201c5b030f50e9f5ea64..daadb744f5957a93941718466367af5b
          return {};
      }
  
-@@ -323,8 +334,40 @@ RemoteStreamSource RemoteIoService::createStreamSource(const QUrl& url) const
+@@ -323,8 +334,41 @@ RemoteStreamSource RemoteIoService::createStreamSource(const QUrl& url) const
  
  std::shared_ptr<PendingRemoteStream> RemoteIoService::prepareStream(const QUrl& url) const
  {
@@ -1693,13 +1688,14 @@ index cc44e07568f1806a2ac7201c5b030f50e9f5ea64..daadb744f5957a93941718466367af5b
 +}
 +
 +std::shared_ptr<PendingRemoteStream> RemoteIoService::prepareStream(const QNetworkRequest& request,
++                                                                    const QUrl& redirectScope,
 +                                                                    std::stop_token sourceLifetime) const
 +{
 +    const auto readAheadKb = std::max(1, m_settings->value<Settings::Core::Internal::RemoteReadAheadKb>());
 +    const auto timeout
 +        = std::chrono::milliseconds{std::max(1000, m_settings->value<Settings::Core::Internal::RemoteOpenTimeoutMs>())};
-+    auto device
-+        = std::make_unique<NetworkStreamDevice>(m_networkManager, request, readAheadKb * 1024, sourceLifetime, nullptr);
++    auto device = std::make_unique<NetworkStreamDevice>(m_networkManager, request, redirectScope, readAheadKb * 1024,
++                                                        sourceLifetime, nullptr);
 +    device->setOpenTimeout(timeout);
 +    RemoteStreamSource source;
 +    source.remoteDevice = device.get();
@@ -1715,18 +1711,18 @@ index cc44e07568f1806a2ac7201c5b030f50e9f5ea64..daadb744f5957a93941718466367af5b
 +    state->network        = m_networkManager;
 +    state->sourceLifetime = sourceLifetime;
 +    state->sourceCancellation.emplace(sourceLifetime, [weakState = std::weak_ptr{state}]() {
-+        if(const auto state = weakState.lock()) {
++        if(const auto cancelledState = weakState.lock()) {
 +            {
-+                const std::scoped_lock lock{state->mutex};
-+                state->ready.notify_all();
++                const std::scoped_lock lock{cancelledState->mutex};
++                cancelledState->ready.notify_all();
 +            }
-+            state->cancellation.request_stop();
++            cancelledState->cancellation.request_stop();
 +        }
 +    });
  
      auto pending
          = std::shared_ptr<PendingRemoteStream>{new PendingRemoteStream{state}, [](PendingRemoteStream* handle) {
-@@ -338,7 +381,6 @@ std::shared_ptr<PendingRemoteStream> RemoteIoService::prepareStream(const QUrl&
+@@ -338,7 +382,6 @@ std::shared_ptr<PendingRemoteStream> RemoteIoService::prepareStream(const QUrl&
                                                 }};
      state->handle = pending;
  
@@ -1735,7 +1731,6 @@ index cc44e07568f1806a2ac7201c5b030f50e9f5ea64..daadb744f5957a93941718466367af5b
  
      const bool invoked = QMetaObject::invokeMethod(
 diff --git a/src/core/playback/playbackordernavigator.cpp b/src/core/playback/playbackordernavigator.cpp
-index 76972e35e1dc2130e60152af22e67762eaa646c1..e72d2720ec46567ae9571ef3fdaff47f2bad65f3 100644
 --- a/src/core/playback/playbackordernavigator.cpp
 +++ b/src/core/playback/playbackordernavigator.cpp
 @@ -61,7 +61,7 @@ Playlist* PlaybackOrderNavigator::playlistForTrack(const PlaylistTrack& track) c
@@ -1748,7 +1743,6 @@ index 76972e35e1dc2130e60152af22e67762eaa646c1..e72d2720ec46567ae9571ef3fdaff47f
      }
  
 diff --git a/src/core/playback/playercontroller.cpp b/src/core/playback/playercontroller.cpp
-index 7eb9e5d42076aac2be00b9191d679bc49800acff..07cb2d1f0f88dbfeff177dcc99560cfdc963020e 100644
 --- a/src/core/playback/playercontroller.cpp
 +++ b/src/core/playback/playercontroller.cpp
 @@ -134,7 +134,7 @@ std::optional<PlaylistTrack> remapPlaylistTrackReference(PlaylistHandler* playli
@@ -1816,7 +1810,6 @@ index 7eb9e5d42076aac2be00b9191d679bc49800acff..07cb2d1f0f88dbfeff177dcc99560cfd
      }
  
 diff --git a/src/core/playlist/playlist.cpp b/src/core/playlist/playlist.cpp
-index 859caa7f8d87d62692a2c0e30e72ae447f21ac00..9ca03dcc8f0bb6b920b3910e36f698b1bf9578e4 100644
 --- a/src/core/playlist/playlist.cpp
 +++ b/src/core/playlist/playlist.cpp
 @@ -989,7 +989,13 @@ bool Playlist::isLocked() const
@@ -1835,10 +1828,16 @@ index 859caa7f8d87d62692a2c0e30e72ae447f21ac00..9ca03dcc8f0bb6b920b3910e36f698b1
  
  QString Playlist::query() const
 diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisthandler.cpp
-index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b725a181a 100644
 --- a/src/core/playlist/playlisthandler.cpp
 +++ b/src/core/playlist/playlisthandler.cpp
-@@ -39,6 +39,9 @@
+@@ -33,12 +33,16 @@
+ #include <core/scripting/trackqueryfilter.h>
+ #include <utils/async.h>
+ #include <utils/crypto.h>
++#include <utils/database/dbtransaction.h>
+ #include <utils/helpers.h>
+ #include <utils/settings/settingsmanager.h>
+ #include <utils/stringcollator.h>
  
  #include <QFileInfo>
  #include <QFuture>
@@ -1848,7 +1847,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
  #include <QLoggingCategory>
  
  #include <deque>
-@@ -246,6 +249,8 @@ void PlaylistHandlerPrivate::reloadPlaylists()
+@@ -246,6 +250,8 @@ void PlaylistHandlerPrivate::reloadPlaylists()
  
          if(playlist) {
              playlist->storeExtraProperties(info.extraProperties);
@@ -1857,7 +1856,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          }
      }
  }
-@@ -257,7 +262,7 @@ void PlaylistHandlerPrivate::populatePlaylists()
+@@ -257,7 +263,7 @@ void PlaylistHandlerPrivate::populatePlaylists()
      m_autoPlaylistStop.request_stop();
  
      const TrackList tracks        = m_library->tracks();
@@ -1866,7 +1865,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
  
      std::unordered_map<int, Track> idTracks;
      for(const Track& track : tracks) {
-@@ -274,8 +279,29 @@ void PlaylistHandlerPrivate::populatePlaylists()
+@@ -274,8 +280,29 @@ void PlaylistHandlerPrivate::populatePlaylists()
              playlist->regenerateTracks(libraryTracks);
          }
          else {
@@ -1898,7 +1897,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          }
      }
  
-@@ -290,7 +316,7 @@ void PlaylistHandlerPrivate::regenerateAutoPlaylists(const TrackList& updatedTra
+@@ -290,7 +317,7 @@ void PlaylistHandlerPrivate::regenerateAutoPlaylists(const TrackList& updatedTra
      m_autoPlaylistPending = false;
      m_autoPlaylistStop.request_stop();
  
@@ -1907,7 +1906,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      const TrackKeySet updatedTrackIds = playlistTrackKeySet(updatedTracks);
  
      for(auto& playlist : m_playlists) {
-@@ -392,7 +418,7 @@ void PlaylistHandlerPrivate::startAutoPlaylistUpdates()
+@@ -392,7 +419,7 @@ void PlaylistHandlerPrivate::startAutoPlaylistUpdates()
          return;
      }
  
@@ -1916,7 +1915,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      const auto searchOptions = TrackQueryFilter::defaultSearchOptions();
      const auto generation{m_autoPlaylistGeneration};
      m_autoPlaylistStop    = std::stop_source{};
-@@ -731,6 +757,9 @@ void PlaylistHandlerPrivate::restoreActivePlaylist()
+@@ -731,6 +758,9 @@ void PlaylistHandlerPrivate::restoreActivePlaylist()
          return;
      }
  
@@ -1926,7 +1925,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      m_activePlaylist = playlist->get();
      Q_EMIT m_self->activePlaylistChanged(m_activePlaylist);
  }
-@@ -800,6 +829,33 @@ PlaylistHandler::PlaylistHandler(DbConnectionPoolPtr dbPool, std::shared_ptr<Aud
+@@ -800,6 +830,33 @@ PlaylistHandler::PlaylistHandler(DbConnectionPoolPtr dbPool, std::shared_ptr<Aud
          PlaylistHandler::createPlaylist(u"Default"_s, {});
      }
  
@@ -1960,7 +1959,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      QObject::connect(p->m_library, &MusicLibrary::tracksLoaded, this, [this]() { p->populatePlaylists(); });
      QObject::connect(p->m_library, &MusicLibrary::tracksAdded, this, [this]() { p->regenerateAutoPlaylists(); });
      QObject::connect(p->m_library, &MusicLibrary::tracksSorted, this, [this]() { p->updateAutoPlaylists({}); });
-@@ -876,12 +932,23 @@ Playlist* PlaylistHandler::playlistByName(const QString& name) const
+@@ -876,12 +933,23 @@ Playlist* PlaylistHandler::playlistByName(const QString& name) const
      return nullptr;
  }
  
@@ -1985,7 +1984,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
              playlists.emplace_back(playlist.get());
          }
      }
-@@ -1027,7 +1094,7 @@ Playlist* PlaylistHandler::createAutoPlaylist(const QString& name, const QString
+@@ -1027,7 +1095,7 @@ Playlist* PlaylistHandler::createAutoPlaylist(const QString& name, const QString
              playlist->setSortQuery(sortQuery);
              playlist->setForceSorted(forceSorted);
  
@@ -1994,7 +1993,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
              const PlaylistTrackList playlistTracks = rebuildPlaylistTracks(playlist, regeneratedTracks);
  
              if(!playlistTracksSameData(playlist->playlistTracks(), PlaylistTrack::updateIndexes(playlistTracks))) {
-@@ -1052,7 +1119,7 @@ Playlist* PlaylistHandler::createNewAutoPlaylist(const QString& name, const QStr
+@@ -1052,7 +1120,7 @@ Playlist* PlaylistHandler::createNewAutoPlaylist(const QString& name, const QStr
      auto* playlist        = p->addNewAutoPlaylist(newName, query, sortQuery, forceSorted);
  
      if(playlist) {
@@ -2003,7 +2002,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          p->replacePlaylistTracks(playlist, rebuildPlaylistTracks(playlist, regeneratedTracks));
          Q_EMIT playlistAdded(playlist);
      }
-@@ -1233,7 +1300,7 @@ void PlaylistHandler::changeActivePlaylist(const UId& id)
+@@ -1233,7 +1301,7 @@ void PlaylistHandler::changeActivePlaylist(const UId& id)
  {
      auto playlist
          = std::ranges::find_if(std::as_const(p->m_playlists), [id](const auto& pl) { return pl->id() == id; });
@@ -2012,7 +2011,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          p->m_activePlaylist = playlist->get();
          Q_EMIT activePlaylistChanged(playlist->get());
      }
-@@ -1241,6 +1308,9 @@ void PlaylistHandler::changeActivePlaylist(const UId& id)
+@@ -1241,6 +1309,9 @@ void PlaylistHandler::changeActivePlaylist(const UId& id)
  
  void PlaylistHandler::changeActivePlaylist(Playlist* playlist)
  {
@@ -2022,7 +2021,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      p->m_activePlaylist = playlist;
      Q_EMIT activePlaylistChanged(playlist);
  }
-@@ -1307,6 +1377,94 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
+@@ -1307,6 +1378,112 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
      return p->nextTrackChange(delta, mode);
  }
  
@@ -2045,6 +2044,10 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +    if(playlist && playlist->sourceLibraryPath() != sourceLibraryPath) {
 +        return nullptr;
 +    }
++    DbTransaction transaction{p->m_playlistConnector.db()};
++    if(!transaction) {
++        return nullptr;
++    }
 +    const bool added = !playlist;
 +    if(!playlist) {
 +        playlist = p->addNewPlaylist(p->findUniqueName(name));
@@ -2052,6 +2055,12 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +    if(!playlist) {
 +        return nullptr;
 +    }
++    const auto discardAdded = [this, added, playlist]() {
++        if(added) {
++            std::erase_if(p->m_playlists, [playlist](const auto& current) { return current.get() == playlist; });
++            p->updateIndices();
++        }
++    };
 +    playlist->setExtraProperty(u"core/source-library-path"_s, sourceLibraryPath);
 +    playlist->setExtraProperty(u"core/source-hidden"_s, isPlaylistVisible(playlist->id()) ? QString{} : u"1"_s);
 +    PlaylistTrackList sourcePlaylistTracks{playlistTracks};
@@ -2067,6 +2076,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +    playlist->setExtraProperty(u"core/source-playlist-entries"_s,
 +                               QString::fromUtf8(QJsonDocument{entries}.toJson(QJsonDocument::Compact)));
 +    p->replacePlaylistTracks(playlist, sourcePlaylistTracks);
++    const QString previousName{playlist->name()};
 +    if(playlist->name() != name) {
 +        QStringList playlistNames;
 +        for(const auto& current : p->m_playlists) {
@@ -2074,14 +2084,18 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +                playlistNames.push_back(current->name());
 +            }
 +        }
-+        const QString newName
-+            = Utils::findUniqueString(name, playlistNames, [](const QString& playlistName) { return playlistName; });
-+        if(p->m_playlistConnector.renamePlaylist(playlist->dbId(), newName)) {
-+            playlist->setName(newName);
-+            Q_EMIT playlistRenamed(playlist);
-+        }
++        playlist->setName(
++            Utils::findUniqueString(name, playlistNames, [](const QString& playlistName) { return playlistName; }));
 +    }
-+    savePlaylist(playlist->id());
++    p->updateIndices();
++    if(!p->m_playlistConnector.savePlaylist(*playlist) || !transaction.commit()) {
++        playlist->setName(previousName);
++        discardAdded();
++        return nullptr;
++    }
++    if(playlist->name() != previousName) {
++        Q_EMIT playlistRenamed(playlist);
++    }
 +    if(added && isPlaylistVisible(playlist->id())) {
 +        Q_EMIT playlistAdded(playlist);
 +    }
@@ -2091,12 +2105,14 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +    return playlist;
 +}
 +
-+void PlaylistHandler::removeExternalPlaylist(const QString& sourceLibraryPath, const UId& id)
++bool PlaylistHandler::removeExternalPlaylist(const QString& sourceLibraryPath, const UId& id)
 +{
 +    Playlist* playlist = playlistById(id);
-+    if(!playlist || playlist->sourceLibraryPath() != sourceLibraryPath
-+       || !p->m_playlistConnector.removePlaylist(playlist->dbId())) {
-+        return;
++    if(!playlist || playlist->sourceLibraryPath() != sourceLibraryPath) {
++        return true;
++    }
++    if(!p->m_playlistConnector.removePlaylist(playlist->dbId())) {
++        return false;
 +    }
 +    if(playlist == p->m_activePlaylist) {
 +        p->m_activePlaylist = nullptr;
@@ -2112,12 +2128,13 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
 +    if(p->noConcretePlaylists()) {
 +        createPlaylist(u"Default"_s, {});
 +    }
++    return true;
 +}
 +
  void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  {
      if(playlistCount() < 1) {
-@@ -1314,7 +1472,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1314,7 +1491,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
      }
  
      auto* playlist = playlistById(id);
@@ -2126,7 +2143,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          qCDebug(PL_HANDLER) << "Playlist could not be renamed to" << name;
          return;
      }
-@@ -1335,7 +1493,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1335,7 +1512,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  {
      auto* playlist = playlistById(id);
@@ -2136,7 +2153,7 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
          return;
      }
  
-@@ -1346,7 +1505,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
+@@ -1346,7 +1524,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  void PlaylistHandler::removePlaylist(const UId& id)
  {
      auto* playlist = playlistById(id);
@@ -2146,7 +2163,6 @@ index 6d74705017056736a737ea6b37dba5bed41bb6b9..55560a7cbd963efea704e74a87a2555b
      }
  
 diff --git a/src/core/track.cpp b/src/core/track.cpp
-index 5a26270fe3d96be42374f5e9f652eb481ef7c570..cca6a2bc35dfaf5d095a861837e45a78b564c53e 100644
 --- a/src/core/track.cpp
 +++ b/src/core/track.cpp
 @@ -50,6 +50,8 @@ constexpr auto FullDateRegex                    = R"lit(\b(\d{4})-(\d{2})-(\d{2}
@@ -2206,7 +2222,6 @@ index 5a26270fe3d96be42374f5e9f652eb481ef7c570..cca6a2bc35dfaf5d095a861837e45a78
  {
      normaliseExtraTrackProperties(p->extraProps);
 diff --git a/src/gui/controls/lovecontrol.cpp b/src/gui/controls/lovecontrol.cpp
-index 64bb8fae60c5c3d51629876b2c3a07167a5135e9..22cb8c8cd12b9f1d1d473106aaa021ce582052d6 100644
 --- a/src/gui/controls/lovecontrol.cpp
 +++ b/src/gui/controls/lovecontrol.cpp
 @@ -242,7 +242,10 @@ void LoveControl::updateTrack(const Track& track)
@@ -2232,7 +2247,6 @@ index 64bb8fae60c5c3d51629876b2c3a07167a5135e9..22cb8c8cd12b9f1d1d473106aaa021ce
      }
  
 diff --git a/src/gui/filters/filtercontroller.cpp b/src/gui/filters/filtercontroller.cpp
-index 34bd838cabec23e7235b933ca527081e5ac0084c..ab2d4f0d7476e02da4585d16b2e7cd8f35d35431 100644
 --- a/src/gui/filters/filtercontroller.cpp
 +++ b/src/gui/filters/filtercontroller.cpp
 @@ -284,6 +284,7 @@ public:
@@ -2294,7 +2308,6 @@ index 34bd838cabec23e7235b933ca527081e5ac0084c..ab2d4f0d7476e02da4585d16b2e7cd8f
          if(!p->m_library->hasActiveLibraryFilters()) {
              p->handleLibraryTracksPatched(tracks);
 diff --git a/src/gui/guiapplication.cpp b/src/gui/guiapplication.cpp
-index baabe712c9b164646a13bd7ef9ab7c7fa2602cdb..78f444a21f1d4bd88b37f66ff609d8a50b488590 100644
 --- a/src/gui/guiapplication.cpp
 +++ b/src/gui/guiapplication.cpp
 @@ -1200,7 +1200,11 @@ void GuiApplication::registerActions()
@@ -2359,7 +2372,6 @@ index baabe712c9b164646a13bd7ef9ab7c7fa2602cdb..78f444a21f1d4bd88b37f66ff609d8a5
              },
              Constants::Actions::OpenFolder);
 diff --git a/src/gui/librarytree/librarytreewidget.cpp b/src/gui/librarytree/librarytreewidget.cpp
-index 2f063d4442beae1ad8b40e6c4165a29645b1c76d..df331be0c6ec2267c7f02efc058a570a7441982c 100644
 --- a/src/gui/librarytree/librarytreewidget.cpp
 +++ b/src/gui/librarytree/librarytreewidget.cpp
 @@ -886,6 +886,12 @@ void LibraryTreeWidget::setupConnections()
@@ -2434,7 +2446,6 @@ index 2f063d4442beae1ad8b40e6c4165a29645b1c76d..df331be0c6ec2267c7f02efc058a570a
          return;
      }
 diff --git a/src/gui/playlist/manager/playlistmanagermodel.cpp b/src/gui/playlist/manager/playlistmanagermodel.cpp
-index 36fc0e80eb215743c50008ee558c73cec2190d03..c221da3f301c33a5fa99c51c628801964ff7830d 100644
 --- a/src/gui/playlist/manager/playlistmanagermodel.cpp
 +++ b/src/gui/playlist/manager/playlistmanagermodel.cpp
 @@ -333,15 +333,22 @@ void PlaylistManagerModel::populate()
@@ -2499,7 +2510,6 @@ index 36fc0e80eb215743c50008ee558c73cec2190d03..c221da3f301c33a5fa99c51c62880196
  }
  
 diff --git a/src/gui/playlist/manager/playlistmanagerwidget.cpp b/src/gui/playlist/manager/playlistmanagerwidget.cpp
-index a6b81c8697284a0491fa846e99ceebc6487ae4c3..700526184c745514c6474bfa5f27c780c2ea2bef 100644
 --- a/src/gui/playlist/manager/playlistmanagerwidget.cpp
 +++ b/src/gui/playlist/manager/playlistmanagerwidget.cpp
 @@ -383,14 +383,20 @@ void PlaylistManagerWidget::updateActionState() const
@@ -2537,7 +2547,6 @@ index a6b81c8697284a0491fa846e99ceebc6487ae4c3..700526184c745514c6474bfa5f27c780
              lockAction->setChecked(playlist->isLocked());
              QObject::connect(lockAction, &QAction::toggled, this, [this, id = playlist->id()](bool locked) {
 diff --git a/src/gui/playlist/organiser/playlistorganiser.cpp b/src/gui/playlist/organiser/playlistorganiser.cpp
-index 3b643da797cfe7f60c129db800ffe7b1f25bb2be..85661c3c4836e889d64ad569720be2209d572f94 100644
 --- a/src/gui/playlist/organiser/playlistorganiser.cpp
 +++ b/src/gui/playlist/organiser/playlistorganiser.cpp
 @@ -514,8 +514,14 @@ void PlaylistOrganiser::contextMenuEvent(QContextMenuEvent* event)
@@ -2569,7 +2578,6 @@ index 3b643da797cfe7f60c129db800ffe7b1f25bb2be..85661c3c4836e889d64ad569720be220
                  lockAction->setChecked(playlist->isLocked());
                  QObject::connect(lockAction, &QAction::toggled, this, [this, id = playlist->id()](bool locked) {
 diff --git a/src/gui/playlist/playlistbox.cpp b/src/gui/playlist/playlistbox.cpp
-index 862756b54c20bfaa13a19197408956ab73456769..063faa1377dd070e780b7dd30ac885bc655bc916 100644
 --- a/src/gui/playlist/playlistbox.cpp
 +++ b/src/gui/playlist/playlistbox.cpp
 @@ -295,11 +295,17 @@ void PlaylistBox::updateActionState()
@@ -2593,7 +2601,6 @@ index 862756b54c20bfaa13a19197408956ab73456769..063faa1377dd070e780b7dd30ac885bc
  }
  
 diff --git a/src/gui/playlist/playlistcontroller.cpp b/src/gui/playlist/playlistcontroller.cpp
-index f686e1979152ee98610aab3afcaa5feba338d56b..6a3d739d5fb796cf4e75d3641b1a1fcc73f9e3a2 100644
 --- a/src/gui/playlist/playlistcontroller.cpp
 +++ b/src/gui/playlist/playlistcontroller.cpp
 @@ -214,7 +214,7 @@ void PlaylistController::applyPresetToPlaylists(int presetId, const std::vector<
@@ -2707,7 +2714,6 @@ index f686e1979152ee98610aab3afcaa5feba338d56b..6a3d739d5fb796cf4e75d3641b1a1fcc
  } // namespace Fooyin
  
 diff --git a/src/gui/playlist/playlistmodel.cpp b/src/gui/playlist/playlistmodel.cpp
-index 96c12a02ebfcf35469fa5b6833c6bb83cd5232ae..7a3a8208470855f65d9e9a20dca534070ddfa664 100644
 --- a/src/gui/playlist/playlistmodel.cpp
 +++ b/src/gui/playlist/playlistmodel.cpp
 @@ -1919,7 +1919,7 @@ PlaylistModel::editableTrackContext(const QModelIndex& index) const
@@ -2731,7 +2737,6 @@ index 96c12a02ebfcf35469fa5b6833c6bb83cd5232ae..7a3a8208470855f65d9e9a20dca53407
                  return trackItem.column(column).joinedText();
              }
 diff --git a/src/gui/playlist/playlisttabs.cpp b/src/gui/playlist/playlisttabs.cpp
-index 0b06da3aafdc1f11ecdcc72facddf338ea14afdb..29e3ce834289aaf0de8e020bdb9168d71c0b4457 100644
 --- a/src/gui/playlist/playlisttabs.cpp
 +++ b/src/gui/playlist/playlisttabs.cpp
 @@ -52,8 +52,10 @@
@@ -2871,7 +2876,6 @@ index 0b06da3aafdc1f11ecdcc72facddf338ea14afdb..29e3ce834289aaf0de8e020bdb9168d7
  
  void PlaylistTabs::playlistChanged(Playlist* oldPlaylist, Playlist* playlist)
 diff --git a/src/gui/playlist/playlisttabs.h b/src/gui/playlist/playlisttabs.h
-index 1fd1e475bae98a69f388d9bb813499c1cc164ec3..a12771afef279a1f07f7c599a4ff0e19d41ea11b 100644
 --- a/src/gui/playlist/playlisttabs.h
 +++ b/src/gui/playlist/playlisttabs.h
 @@ -135,6 +135,7 @@ protected:
@@ -2883,7 +2887,6 @@ index 1fd1e475bae98a69f388d9bb813499c1cc164ec3..a12771afef279a1f07f7c599a4ff0e19
  
      void tabChanged(int index) const;
 diff --git a/src/gui/playlist/playlistview.cpp b/src/gui/playlist/playlistview.cpp
-index 8d500d8bff7f5c58c8a7b8585c9deee91c2be4ec..e655d768c44a154cb5d4560c8eebb6b77e88ef41 100644
 --- a/src/gui/playlist/playlistview.cpp
 +++ b/src/gui/playlist/playlistview.cpp
 @@ -825,6 +825,15 @@ void PlaylistView::editTrackStat(const QModelIndex& index, const QVariant& value
@@ -2903,7 +2906,6 @@ index 8d500d8bff7f5c58c8a7b8585c9deee91c2be4ec..e655d768c44a154cb5d4560c8eebb6b7
          auto* playlistModel = qobject_cast<PlaylistModel*>(model());
          if(playlistModel && indexes.size() > 1) {
 diff --git a/src/gui/playlist/playlistworkspace.cpp b/src/gui/playlist/playlistworkspace.cpp
-index 0f0f14d55aaac8f5ea17f00ca02ae44bcef1fca7..96cc4fbf7ea34d26a9a063de75961e4349631f06 100644
 --- a/src/gui/playlist/playlistworkspace.cpp
 +++ b/src/gui/playlist/playlistworkspace.cpp
 @@ -88,8 +88,12 @@ void PlaylistWorkspace::restoreLastPlaylist(PlaylistHandler* handler, PlayerCont
@@ -2933,7 +2935,6 @@ index 0f0f14d55aaac8f5ea17f00ca02ae44bcef1fca7..96cc4fbf7ea34d26a9a063de75961e43
  {
      return m_currentPlaylist;
 diff --git a/src/gui/playlist/playlistworkspace.h b/src/gui/playlist/playlistworkspace.h
-index 2d448e422d2ffc27c302e60f5b318b1afa451509..7354d07f970e6e9a624ce964664162f2b0bfbcf0 100644
 --- a/src/gui/playlist/playlistworkspace.h
 +++ b/src/gui/playlist/playlistworkspace.h
 @@ -44,6 +44,7 @@ public:
@@ -2945,7 +2946,6 @@ index 2d448e422d2ffc27c302e60f5b318b1afa451509..7354d07f970e6e9a624ce964664162f2
      [[nodiscard]] bool currentIsActive(const PlaylistHandler* handler) const;
      [[nodiscard]] bool currentIsAuto() const;
 diff --git a/src/gui/search/searchwidget.cpp b/src/gui/search/searchwidget.cpp
-index 78afe19c41d58b47da19f647ec73c5c4763baf7e..529310760019e7346bc0a7270653f8ea92c81247 100644
 --- a/src/gui/search/searchwidget.cpp
 +++ b/src/gui/search/searchwidget.cpp
 @@ -69,6 +69,10 @@ SearchWidget::SearchWidget(SearchController* controller, PlaylistController* pla
@@ -2974,7 +2974,6 @@ index 78afe19c41d58b47da19f647ec73c5c4763baf7e..529310760019e7346bc0a7270653f8ea
              return {};
          case SearchMode::Playlist:
 diff --git a/src/gui/widgets/expandedtreeview.cpp b/src/gui/widgets/expandedtreeview.cpp
-index 10b217c539b3600bd099667966100f12c6acc66d..94788ac1ae9bf40fc9dcef5b8e5a0520d2b667d7 100644
 --- a/src/gui/widgets/expandedtreeview.cpp
 +++ b/src/gui/widgets/expandedtreeview.cpp
 @@ -4287,7 +4287,7 @@ void ExpandedTreeViewPrivate::interruptDelayedItemsLayout() const
@@ -3107,7 +3106,6 @@ index 10b217c539b3600bd099667966100f12c6acc66d..94788ac1ae9bf40fc9dcef5b8e5a0520
      if(p->m_sortingEnabled) {
          sortByColumn(p->m_header->sortIndicatorSection(), p->m_header->sortIndicatorOrder());
 diff --git a/src/gui/widgets/expandedtreeview_p.h b/src/gui/widgets/expandedtreeview_p.h
-index c021f931cc4878137442d56607c5910de49a8ca1..3338dac105f869d8a08fd8101b026204d1e2a8a9 100644
 --- a/src/gui/widgets/expandedtreeview_p.h
 +++ b/src/gui/widgets/expandedtreeview_p.h
 @@ -191,6 +191,8 @@ public:
@@ -3120,7 +3118,6 @@ index c021f931cc4878137442d56607c5910de49a8ca1..3338dac105f869d8a08fd8101b026204
  
      mutable std::vector<ExpandedTreeViewItem> m_viewItems;
 diff --git a/src/plugins/scrobbler/services/scrobblerservice.cpp b/src/plugins/scrobbler/services/scrobblerservice.cpp
-index 1111400c0b74b1a8b4f61da0d6397939df13e71e..564fa006c469093457bd9b11562f65b32a1099ec 100644
 --- a/src/plugins/scrobbler/services/scrobblerservice.cpp
 +++ b/src/plugins/scrobbler/services/scrobblerservice.cpp
 @@ -52,8 +52,7 @@ constexpr auto MinLovedDelayOnError    = 30000;
@@ -3134,7 +3131,6 @@ index 1111400c0b74b1a8b4f61da0d6397939df13e71e..564fa006c469093457bd9b11562f65b3
  } // namespace
  
 diff --git a/tests/core/engine/audioenginetest.cpp b/tests/core/engine/audioenginetest.cpp
-index ef177fc345d319bd571c519d6c33ea4a23fa9a9c..1136e732a4db4d98eea593844d71172b7625a3d1 100644
 --- a/tests/core/engine/audioenginetest.cpp
 +++ b/tests/core/engine/audioenginetest.cpp
 @@ -61,6 +61,7 @@ namespace {
@@ -3338,7 +3334,6 @@ index ef177fc345d319bd571c519d6c33ea4a23fa9a9c..1136e732a4db4d98eea593844d71172b
 +
  } // namespace Fooyin::Testing
 diff --git a/tests/core/engine/audioloadertest.cpp b/tests/core/engine/audioloadertest.cpp
-index b910a30feb20ff23c65ffbc9bd07a04bd16fc2d7..55116614d90df072734a12c5dfa7e7472b3835ee 100644
 --- a/tests/core/engine/audioloadertest.cpp
 +++ b/tests/core/engine/audioloadertest.cpp
 @@ -132,6 +132,7 @@ struct DecoderState
@@ -3380,7 +3375,6 @@ index b910a30feb20ff23c65ffbc9bd07a04bd16fc2d7..55116614d90df072734a12c5dfa7e747
      EXPECT_EQ(nullptr, loadedDecoder.input.source.device);
      EXPECT_EQ(nullptr, loadedDecoder.input.device.get());
 diff --git a/tests/core/engine/carrierdecodertest.cpp b/tests/core/engine/carrierdecodertest.cpp
-index 4f5e1889b3f91375e3f655f414c1e8d37f2a634b..596ce77b06e1b953391c8310260e5a7e167811d3 100644
 --- a/tests/core/engine/carrierdecodertest.cpp
 +++ b/tests/core/engine/carrierdecodertest.cpp
 @@ -35,6 +35,11 @@ public:
@@ -3419,7 +3413,6 @@ index 4f5e1889b3f91375e3f655f414c1e8d37f2a634b..596ce77b06e1b953391c8310260e5a7e
  }
  } // namespace Fooyin::Testing
 diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library/unifiedmusiclibrarytest.cpp
-index 7d3aa63f73749cf7bdef9db057abe1167aaf184e..159ff12d79f915e91ca94877c97ae22222286f73 100644
 --- a/tests/core/library/unifiedmusiclibrarytest.cpp
 +++ b/tests/core/library/unifiedmusiclibrarytest.cpp
 @@ -31,6 +31,8 @@
@@ -3501,7 +3494,7 @@ index 7d3aa63f73749cf7bdef9db057abe1167aaf184e..159ff12d79f915e91ca94877c97ae222
  class FakeLibraryReader : public Fooyin::AudioReader
  {
  public:
-@@ -1241,3 +1289,1008 @@ TEST_F(UnifiedMusicLibraryTest, RestoresStatsWhenUnmanagedTrackIsReadded)
+@@ -1241,3 +1289,1085 @@ TEST_F(UnifiedMusicLibraryTest, RestoresStatsWhenUnmanagedTrackIsReadded)
      EXPECT_EQ(tracks.front().lastPlayed(), 500);
  }
  } // namespace Fooyin::Testing
@@ -4203,8 +4196,8 @@ index 7d3aa63f73749cf7bdef9db057abe1167aaf184e..159ff12d79f915e91ca94877c97ae222
 +    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), mirror);
 +    EXPECT_EQ(context().playlistHandler.playlistById(localId)->tracks().front().id(), track.id());
 +    context().library.setExternalLibraryActive(*library, true);
-+    const auto restored = context().playlistHandler.playlists();
-+    EXPECT_NE(std::ranges::find(restored, mirror), restored.end());
++    const auto visibleAfterActivation = context().playlistHandler.playlists();
++    EXPECT_NE(std::ranges::find(visibleAfterActivation, mirror), visibleAfterActivation.end());
 +    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), mirror);
 +    context().library.setExternalLibraryActive(*library, false);
 +    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Hidden update"_s,
@@ -4240,6 +4233,83 @@ index 7d3aa63f73749cf7bdef9db057abe1167aaf184e..159ff12d79f915e91ca94877c97ae222
 +    const auto removed = context().playlistHandler.removedPlaylists();
 +    EXPECT_TRUE(
 +        std::ranges::none_of(removed, [mirrorId](const Playlist* playlist) { return playlist->id() == mirrorId; }));
++}
++
++TEST_F(UnifiedMusicLibraryTest, ExternalPlaylistWriteFailuresKeepStoredPlaylistsForRetry)
++{
++    const auto library = context().library.addExternalLibrary(u"test-source://failing"_s, u"Account"_s);
++    ASSERT_TRUE(library);
++    QSignalSpy applied{&context().library, &MusicLibrary::externalLibrarySnapshotFinished};
++    context().library.applyExternalLibrarySnapshot(
++        *library, {externalTrack(u"test-source://failing/item"_s, u"Title"_s)}, QUuid::createUuid());
++    ASSERT_TRUE(waitForSignal(applied).at(2).toBool());
++    const Track track = context().library.libraryTracks().front();
++    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(library->path, {}, u"Server playlist"_s,
++                                                                        PlaylistTrack::fromTracks({track}, {}));
++    ASSERT_NE(mirror, nullptr);
++    const UId mirrorId             = mirror->id();
++    const int mirrorDbId           = mirror->dbId();
++    const size_t playlistCount     = context().playlistHandler.playlists().size();
++    const auto sourcePlaylistDbIds = [&library](const PlaylistHandler& handler) {
++        std::vector<int> dbIds;
++        for(const Playlist* playlist : handler.playlists()) {
++            if(playlist->sourceLibraryPath() == library->path) {
++                dbIds.push_back(playlist->dbId());
++            }
++        }
++        return dbIds;
++    };
++
++    const Fooyin::DbConnectionProvider dbProvider{context().dbPool};
++    Fooyin::DbQuery failInsert{dbProvider.db(), u"CREATE TRIGGER FailPlaylistTracks BEFORE INSERT ON PlaylistTracks "
++                                                u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
++    ASSERT_TRUE(failInsert.exec()) << failInsert.lastError().text().toStdString();
++    Fooyin::DbQuery failDelete{dbProvider.db(), u"CREATE TRIGGER FailPlaylists BEFORE DELETE ON Playlists "
++                                                u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
++    ASSERT_TRUE(failDelete.exec()) << failDelete.lastError().text().toStdString();
++
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, {}, u"New playlist"_s,
++                                                              PlaylistTrack::fromTracks({track}, {})),
++              nullptr);
++    EXPECT_EQ(context().playlistHandler.playlists().size(), playlistCount);
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Renamed"_s,
++                                                              PlaylistTrack::fromTracks({track, track}, {})),
++              nullptr);
++    EXPECT_EQ(mirror->name(), u"Server playlist"_s);
++    EXPECT_FALSE(context().playlistHandler.removeExternalPlaylist(library->path, mirrorId));
++    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), mirror);
++
++    Fooyin::DbQuery dropInsert{dbProvider.db(), u"DROP TRIGGER FailPlaylistTracks;"_s};
++    ASSERT_TRUE(dropInsert.exec()) << dropInsert.lastError().text().toStdString();
++    Fooyin::DbQuery dropDelete{dbProvider.db(), u"DROP TRIGGER FailPlaylists;"_s};
++    ASSERT_TRUE(dropDelete.exec()) << dropDelete.lastError().text().toStdString();
++    {
++        PlaylistHandler restored{context().dbPool, context().audioLoader, &context().library, &context().settings};
++        QSignalSpy loaded{&context().library, &MusicLibrary::tracksLoaded};
++        context().library.loadAllTracks();
++        waitForSignal(loaded);
++        EXPECT_EQ(sourcePlaylistDbIds(restored), std::vector<int>{mirrorDbId});
++        ASSERT_NE(restored.playlistByDbId(mirrorDbId), nullptr);
++        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->name(), u"Server playlist"_s);
++        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->trackCount(), 1);
++    }
++
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Renamed"_s,
++                                                              PlaylistTrack::fromTracks({track, track}, {})),
++              mirror);
++    EXPECT_EQ(mirror->name(), u"Renamed"_s);
++    {
++        PlaylistHandler restored{context().dbPool, context().audioLoader, &context().library, &context().settings};
++        QSignalSpy loaded{&context().library, &MusicLibrary::tracksLoaded};
++        context().library.loadAllTracks();
++        waitForSignal(loaded);
++        EXPECT_EQ(sourcePlaylistDbIds(restored), std::vector<int>{mirrorDbId});
++        ASSERT_NE(restored.playlistByDbId(mirrorDbId), nullptr);
++        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->name(), u"Renamed"_s);
++        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->trackCount(), 2);
++    }
++    EXPECT_TRUE(context().playlistHandler.removeExternalPlaylist(library->path, mirrorId));
++    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), nullptr);
 +}
 +
 +TEST_F(UnifiedMusicLibraryTest, ExternalSnapshotAcknowledgesEachExactOperationOnce)
@@ -4511,7 +4581,6 @@ index 7d3aa63f73749cf7bdef9db057abe1167aaf184e..159ff12d79f915e91ca94877c97ae222
 +
 +} // namespace Fooyin::Testing
 diff --git a/tests/core/playback/playercontrollertest.cpp b/tests/core/playback/playercontrollertest.cpp
-index 2a171ebcc2e4c9edcddd3c9e85660e6e6f98ac5d..96ebde45745276e4967f140089ced47c8b5cf30f 100644
 --- a/tests/core/playback/playercontrollertest.cpp
 +++ b/tests/core/playback/playercontrollertest.cpp
 @@ -304,6 +304,30 @@ TEST(PlayerControllerTest, TrackPlayedEmitsOnceAfterCrossingThreshold)
@@ -4546,7 +4615,6 @@ index 2a171ebcc2e4c9edcddd3c9e85660e6e6f98ac5d..96ebde45745276e4967f140089ced47c
  {
      ensureCoreApplication();
 diff --git a/tests/testutils.cpp b/tests/testutils.cpp
-index d5af35868535b4302690dddfe18904fae70d9ce9..64326513dbf16af27f678a318b29018266691efc 100644
 --- a/tests/testutils.cpp
 +++ b/tests/testutils.cpp
 @@ -347,4 +347,15 @@ WriteRequest StubMusicLibrary::deleteTracks(const TrackList& /*tracks*/)
@@ -4566,7 +4634,6 @@ index d5af35868535b4302690dddfe18904fae70d9ce9..64326513dbf16af27f678a318b290182
 +}
  } // namespace Fooyin::Testing
 diff --git a/tests/testutils.h b/tests/testutils.h
-index 75bfbc2f92f7d0f0a5f434e2b167d378b2c5157c..154af06e5bae0e9f7aba685ea31b69748630b177 100644
 --- a/tests/testutils.h
 +++ b/tests/testutils.h
 @@ -103,6 +103,9 @@ public:

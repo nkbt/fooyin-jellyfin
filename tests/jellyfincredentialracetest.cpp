@@ -23,14 +23,17 @@
 #include "jellyfintrack.h"
 #include "syntheticnetworkaccessmanager.h"
 #include "testsupport.h"
+
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QScopeGuard>
 #include <QTest>
+
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <condition_variable>
-#include <gtest/gtest.h>
 #include <mutex>
 
 using namespace Qt::StringLiterals;

@@ -18,6 +18,7 @@
  */
 
 #include "jellyfinplaylistmirror.h"
+
 #include "testsupport.h"
 
 #include <core/engine/audioloader.h>
@@ -73,7 +74,7 @@ DbConnectionPoolPtr createPool(const QString& filePath)
 
 Track makeTrack(const QString& itemId, int id)
 {
-    Track track{trackPath(sourceKey(u"server1"_s, u"user1"_s), itemId)};
+    Track track{trackPath(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s), itemId)};
     track.setId(id);
     track.setTitle(itemId);
     track.generateHash();
@@ -102,12 +103,13 @@ protected:
         , m_playlistHandler{m_dbPool, m_audioLoader, &m_library, &m_settings}
         , m_mirror{&m_playlistHandler, &m_settings}
     {
-        const auto first = m_library.addExternalLibrary(libraryUri(sourceKey(u"server1"_s, u"user1"_s)), u"First"_s);
+        const auto first = m_library.addExternalLibrary(
+            libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s)), u"First"_s);
         m_library.applyExternalLibrarySnapshot(
             *first, {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2), makeTrack(u"track3"_s, 3)},
             QUuid::createUuid());
         QCoreApplication::processEvents();
-        m_library.addExternalLibrary(libraryUri(sourceKey(u"server1"_s, u"user2"_s)), u"Second"_s);
+        m_library.addExternalLibrary(libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s)), u"Second"_s);
     }
 
     QTemporaryDir m_dir;
@@ -124,12 +126,13 @@ protected:
 TEST_F(JellyfinPlaylistMirrorTest, CreatesSourceOwnedPlaylistsAndReusesThem)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
 
-    m_mirror.apply(key, {{.playlistId = u"playlist1"_s,
-                          .name       = u"Synthetic Mix"_s,
-                          .tracks = {makeTrack(u"track2"_s, 2), makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
-                          .playlistItemIds = {u"entry0"_s, u"entry1"_s, u"entry2"_s}}});
+    m_mirror.apply(sourceKey,
+                   {{.playlistId = u"playlist1"_s,
+                     .name       = u"Synthetic Mix"_s,
+                     .tracks     = {makeTrack(u"track2"_s, 2), makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
+                     .playlistItemIds = {u"entry0"_s, u"entry1"_s, u"entry2"_s}}});
 
     Playlist* mix = m_playlistHandler.playlistByName(u"Synthetic Mix"_s);
     ASSERT_NE(mix, nullptr);
@@ -137,10 +140,10 @@ TEST_F(JellyfinPlaylistMirrorTest, CreatesSourceOwnedPlaylistsAndReusesThem)
     EXPECT_EQ(titles(mix), (QStringList{u"track2"_s, u"track1"_s, u"track2"_s}));
     const UId mixId = mix->id();
 
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Renamed Mix"_s,
-                          .tracks          = {makeTrack(u"track3"_s, 3)},
-                          .playlistItemIds = {u"entry0"_s}}});
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Renamed Mix"_s,
+                                .tracks          = {makeTrack(u"track3"_s, 3)},
+                                .playlistItemIds = {u"entry0"_s}}});
 
     Playlist* renamed = m_playlistHandler.playlistById(mixId);
     ASSERT_NE(renamed, nullptr);
@@ -153,9 +156,9 @@ TEST_F(JellyfinPlaylistMirrorTest, CreatesSourceOwnedPlaylistsAndReusesThem)
 TEST_F(JellyfinPlaylistMirrorTest, RemovesPlaylistsDeletedOnTheServer)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
 
-    m_mirror.apply(key,
+    m_mirror.apply(sourceKey,
                    {{.playlistId      = u"playlist1"_s,
                      .name            = u"Synthetic Mix"_s,
                      .tracks          = {makeTrack(u"track1"_s, 1)},
@@ -164,10 +167,10 @@ TEST_F(JellyfinPlaylistMirrorTest, RemovesPlaylistsDeletedOnTheServer)
     const Playlist* local = m_playlistHandler.createPlaylist(u"Local Playlist"_s);
     ASSERT_NE(local, nullptr);
 
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Synthetic Mix"_s,
-                          .tracks          = {makeTrack(u"track1"_s, 1)},
-                          .playlistItemIds = {u"entry0"_s}}});
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Synthetic Mix"_s,
+                                .tracks          = {makeTrack(u"track1"_s, 1)},
+                                .playlistItemIds = {u"entry0"_s}}});
 
     EXPECT_NE(m_playlistHandler.playlistByName(u"Synthetic Mix"_s), nullptr);
     EXPECT_EQ(m_playlistHandler.playlistByName(u"Synthetic Other"_s), nullptr);
@@ -177,8 +180,8 @@ TEST_F(JellyfinPlaylistMirrorTest, RemovesPlaylistsDeletedOnTheServer)
 TEST_F(JellyfinPlaylistMirrorTest, KeepsAccountsSeparate)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString first  = sourceKey(u"server1"_s, u"user1"_s);
-    const QString second = sourceKey(u"server1"_s, u"user2"_s);
+    const QString first  = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    const QString second = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s);
 
     m_mirror.apply(first,
                    {{.playlistId = u"playlist1"_s, .name = u"First Mix"_s, .tracks = {}, .playlistItemIds = {}}});
@@ -192,11 +195,11 @@ TEST_F(JellyfinPlaylistMirrorTest, KeepsAccountsSeparate)
 TEST_F(JellyfinPlaylistMirrorTest, SourceOwnerCannotBeUnlockedOrEditedThroughCoreOperations)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Synthetic Mix"_s,
-                          .tracks          = {makeTrack(u"track1"_s, 1)},
-                          .playlistItemIds = {u"entry0"_s}}});
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Synthetic Mix"_s,
+                                .tracks          = {makeTrack(u"track1"_s, 1)},
+                                .playlistItemIds = {u"entry0"_s}}});
     Playlist* playlist = m_playlistHandler.playlistByName(u"Synthetic Mix"_s);
     ASSERT_NE(playlist, nullptr);
     const UId id = playlist->id();
@@ -209,30 +212,30 @@ TEST_F(JellyfinPlaylistMirrorTest, SourceOwnerCannotBeUnlockedOrEditedThroughCor
     m_playlistHandler.removePlaylist(id);
     EXPECT_EQ(m_playlistHandler.playlistById(id), playlist);
     EXPECT_EQ(titles(playlist), QStringList{u"track1"_s});
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Refreshed Mix"_s,
-                          .tracks          = {makeTrack(u"track2"_s, 2)},
-                          .playlistItemIds = {u"entry0"_s}}});
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Refreshed Mix"_s,
+                                .tracks          = {makeTrack(u"track2"_s, 2)},
+                                .playlistItemIds = {u"entry0"_s}}});
     EXPECT_EQ(m_playlistHandler.playlistById(id), playlist);
     EXPECT_EQ(titles(playlist), QStringList{u"track2"_s});
 }
 TEST_F(JellyfinPlaylistMirrorTest, PreservesDistinctServerOccurrenceIdentityWhenRepeatedEntriesReorder)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Repeated"_s,
-                          .tracks          = {makeTrack(u"track1"_s, 1), makeTrack(u"track1"_s, 1)},
-                          .playlistItemIds = {u"server-entry-a"_s, u"server-entry-b"_s}}});
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Repeated"_s,
+                                .tracks          = {makeTrack(u"track1"_s, 1), makeTrack(u"track1"_s, 1)},
+                                .playlistItemIds = {u"server-entry-a"_s, u"server-entry-b"_s}}});
     Playlist* playlist = m_playlistHandler.playlistByName(u"Repeated"_s);
     ASSERT_NE(playlist, nullptr);
     const auto before = playlist->playlistTracks();
     ASSERT_EQ(before.size(), 2U);
     EXPECT_NE(before.at(0).entryId, before.at(1).entryId);
-    m_mirror.apply(key, {{.playlistId      = u"playlist1"_s,
-                          .name            = u"Repeated"_s,
-                          .tracks          = {makeTrack(u"track1"_s, 1), makeTrack(u"track1"_s, 1)},
-                          .playlistItemIds = {u"server-entry-b"_s, u"server-entry-a"_s}}});
+    m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                .name            = u"Repeated"_s,
+                                .tracks          = {makeTrack(u"track1"_s, 1), makeTrack(u"track1"_s, 1)},
+                                .playlistItemIds = {u"server-entry-b"_s, u"server-entry-a"_s}}});
     const auto after = playlist->playlistTracks();
     ASSERT_EQ(after.size(), 2U);
     EXPECT_EQ(after.at(0).entryId, before.at(1).entryId);
@@ -241,19 +244,19 @@ TEST_F(JellyfinPlaylistMirrorTest, PreservesDistinctServerOccurrenceIdentityWhen
 TEST_F(JellyfinPlaylistMirrorTest, ReusesPersistentSourcePlaylistAfterHandlerRestartWhileHidden)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
     const std::vector<MirroredPlaylist> snapshot{
         {.playlistId      = u"playlist1"_s,
          .name            = u"Retained source playlist"_s,
          .tracks          = {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2), makeTrack(u"track1"_s, 1)},
          .playlistItemIds = {u"entry1"_s, u"entry2"_s, u"entry3"_s}}};
-    m_mirror.apply(key, snapshot);
+    m_mirror.apply(sourceKey, snapshot);
     Playlist* original = m_playlistHandler.playlistByName(u"Retained source playlist"_s);
     ASSERT_NE(original, nullptr);
     const int nativePlaylistDbId = original->dbId();
     const auto originalEntries   = original->playlistTracks();
     m_playlistHandler.savePlaylists();
-    const auto source = m_library.libraryForPath(libraryUri(key));
+    const auto source = m_library.libraryForPath(libraryUri(sourceKey));
     ASSERT_TRUE(source);
     m_library.setExternalLibraryActive(*source, false);
     PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &m_settings};
@@ -267,7 +270,7 @@ TEST_F(JellyfinPlaylistMirrorTest, ReusesPersistentSourcePlaylistAfterHandlerRes
         EXPECT_EQ(loadedEntries.at(index).track.id(), originalEntries.at(index).track.id());
         EXPECT_EQ(loadedEntries.at(index).entryId, originalEntries.at(index).entryId);
     }
-    restoredMirror.apply(key, snapshot);
+    restoredMirror.apply(sourceKey, snapshot);
     Playlist* retained = restored.playlistByName(u"Retained source playlist"_s);
     ASSERT_NE(retained, nullptr);
     EXPECT_EQ(retained->dbId(), nativePlaylistDbId);
@@ -276,30 +279,88 @@ TEST_F(JellyfinPlaylistMirrorTest, ReusesPersistentSourcePlaylistAfterHandlerRes
     EXPECT_EQ(retained->trackCount(), originalEntries.size());
     auto reordered                    = snapshot;
     reordered.front().playlistItemIds = {u"entry3"_s, u"entry2"_s, u"entry1"_s};
-    restoredMirror.apply(key, reordered);
+    restoredMirror.apply(sourceKey, reordered);
     const auto reorderedEntries = retained->playlistTracks();
     ASSERT_EQ(reorderedEntries.size(), 3U);
     EXPECT_EQ(reorderedEntries.at(0).entryId, originalEntries.at(2).entryId);
     EXPECT_EQ(reorderedEntries.at(1).entryId, originalEntries.at(1).entryId);
     EXPECT_EQ(reorderedEntries.at(2).entryId, originalEntries.at(0).entryId);
-    restoredMirror.apply(key, {});
+    restoredMirror.apply(sourceKey, {});
     EXPECT_EQ(restored.playlistByDbId(nativePlaylistDbId), nullptr);
+}
+
+TEST_F(JellyfinPlaylistMirrorTest, FailedWritesKeepIdentitiesAndRecoverAfterRestartWithoutDuplicates)
+{
+    ASSERT_TRUE(m_dbInitialised);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    ASSERT_TRUE(m_mirror.apply(
+        sourceKey, {{.playlistId      = u"playlist1"_s,
+                     .name            = u"Kept"_s,
+                     .tracks          = {makeTrack(u"track1"_s, 1)},
+                     .playlistItemIds = {u"entry1"_s}},
+                    {.playlistId = u"playlist2"_s, .name = u"Deleted"_s, .tracks = {}, .playlistItemIds = {}}}));
+    const int keptDbId    = m_playlistHandler.playlistByName(u"Kept"_s)->dbId();
+    const int deletedDbId = m_playlistHandler.playlistByName(u"Deleted"_s)->dbId();
+    const std::vector<MirroredPlaylist> snapshot{{.playlistId = u"playlist1"_s,
+                                                  .name       = u"Kept"_s,
+                                                  .tracks     = {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
+                                                  .playlistItemIds = {u"entry1"_s, u"entry2"_s}},
+                                                 {.playlistId      = u"playlist3"_s,
+                                                  .name            = u"Added"_s,
+                                                  .tracks          = {makeTrack(u"track3"_s, 3)},
+                                                  .playlistItemIds = {u"entry3"_s}}};
+
+    const DbConnectionProvider dbProvider{m_dbPool};
+    DbQuery failInsert{dbProvider.db(), u"CREATE TRIGGER FailPlaylistTracks BEFORE INSERT ON PlaylistTracks "
+                                        u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
+    ASSERT_TRUE(failInsert.exec());
+    DbQuery failDelete{dbProvider.db(), u"CREATE TRIGGER FailPlaylists BEFORE DELETE ON Playlists "
+                                        u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
+    ASSERT_TRUE(failDelete.exec());
+    EXPECT_FALSE(m_mirror.apply(sourceKey, snapshot));
+    EXPECT_EQ(m_playlistHandler.playlistByName(u"Added"_s), nullptr);
+    EXPECT_NE(m_playlistHandler.playlistByDbId(deletedDbId), nullptr);
+    DbQuery dropInsert{dbProvider.db(), u"DROP TRIGGER FailPlaylistTracks;"_s};
+    ASSERT_TRUE(dropInsert.exec());
+    DbQuery dropDelete{dbProvider.db(), u"DROP TRIGGER FailPlaylists;"_s};
+    ASSERT_TRUE(dropDelete.exec());
+
+    PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &m_settings};
+    PlaylistMirror restoredMirror{&restored, &m_settings};
+    m_library.loadAllTracks();
+    EXPECT_EQ(restored.playlistByName(u"Added"_s), nullptr);
+    ASSERT_NE(restored.playlistByDbId(keptDbId), nullptr);
+    EXPECT_EQ(titles(restored.playlistByDbId(keptDbId)), QStringList{u"track1"_s});
+    EXPECT_TRUE(restoredMirror.apply(sourceKey, snapshot));
+
+    int sourcePlaylists{0};
+    for(const Playlist* playlist : restored.playlists()) {
+        if(playlist->sourceLibraryPath() == libraryUri(sourceKey)) {
+            ++sourcePlaylists;
+        }
+    }
+    EXPECT_EQ(sourcePlaylists, 2);
+    EXPECT_EQ(titles(restored.playlistByDbId(keptDbId)), (QStringList{u"track1"_s, u"track2"_s}));
+    ASSERT_NE(restored.playlistByName(u"Added"_s), nullptr);
+    EXPECT_EQ(titles(restored.playlistByName(u"Added"_s)), QStringList{u"track3"_s});
+    EXPECT_EQ(restored.playlistByDbId(deletedDbId), nullptr);
 }
 
 TEST_F(JellyfinPlaylistMirrorTest, CorruptMappingCannotTakeOverLocalOrAnotherSourcePlaylist)
 {
     ASSERT_TRUE(m_dbInitialised);
-    const QString key = sourceKey(u"server1"_s, u"user1"_s);
-    Playlist* local   = m_playlistHandler.createNewPlaylist(u"Local"_s, {makeTrack(u"track1"_s, 1)});
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    Playlist* local         = m_playlistHandler.createNewPlaylist(u"Local"_s, {makeTrack(u"track1"_s, 1)});
     ASSERT_NE(local, nullptr);
-    const auto other = m_library.libraryForPath(libraryUri(sourceKey(u"server1"_s, u"user2"_s)));
+    const auto other = m_library.libraryForPath(libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s)));
     ASSERT_TRUE(other);
     Playlist* foreign = m_playlistHandler.applyExternalPlaylist(other->path, {}, u"Other source"_s, {});
     ASSERT_NE(foreign, nullptr);
-    m_settings.fileSet(u"Jellyfin/Playlists/"_s + key,
+    m_settings.fileSet(u"Jellyfin/Playlists/"_s + sourceKey,
                        QVariantMap{{u"playlist1"_s, QVariantMap{{u"nativePlaylistDbId"_s, local->dbId()}}},
                                    {u"playlist2"_s, QVariantMap{{u"nativePlaylistDbId"_s, foreign->dbId()}}}});
-    m_mirror.apply(key, {{.playlistId = u"playlist1"_s, .name = u"Remote"_s, .tracks = {}, .playlistItemIds = {}}});
+    m_mirror.apply(sourceKey,
+                   {{.playlistId = u"playlist1"_s, .name = u"Remote"_s, .tracks = {}, .playlistItemIds = {}}});
     EXPECT_EQ(local->name(), u"Local"_s);
     EXPECT_EQ(local->trackCount(), 1);
     EXPECT_TRUE(local->sourceLibraryPath().isEmpty());
@@ -309,7 +370,7 @@ TEST_F(JellyfinPlaylistMirrorTest, CorruptMappingCannotTakeOverLocalOrAnotherSou
     Playlist* remote = m_playlistHandler.playlistByName(u"Remote"_s);
     ASSERT_NE(remote, nullptr);
     EXPECT_NE(remote->dbId(), local->dbId());
-    EXPECT_EQ(remote->sourceLibraryPath(), libraryUri(key));
+    EXPECT_EQ(remote->sourceLibraryPath(), libraryUri(sourceKey));
 }
 
 } // namespace Fooyin::Jellyfin::Testing

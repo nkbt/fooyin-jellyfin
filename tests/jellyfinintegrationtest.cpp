@@ -17,19 +17,19 @@
  *
  */
 
-#include "core/application.h"
-#include "core/engine/input/ffmpeg/ffmpeginput.h"
-#include "core/plugins/pluginmanager.h"
 #include "fakejellyfinserver.h"
-#include "gui/filters/filteritem.h"
-#include "gui/guiapplication.h"
-#include "gui/librarytree/librarytreeitem.h"
-#include "gui/playlist/playlistcontroller.h"
 #include "jellyfinaccess.h"
 #include "jellyfincatalogsync.h"
 #include "jellyfininput.h"
 #include "jellyfinplaybackreporter.h"
 
+#include "core/application.h"
+#include "core/engine/input/ffmpeg/ffmpeginput.h"
+#include "core/plugins/pluginmanager.h"
+#include "gui/filters/filteritem.h"
+#include "gui/guiapplication.h"
+#include "gui/librarytree/librarytreeitem.h"
+#include "gui/playlist/playlistcontroller.h"
 #include <core/coresettings.h>
 #include <core/engine/audioloader.h>
 #include <core/engine/enginecontroller.h>
@@ -37,7 +37,14 @@
 #include <core/player/playercontroller.h>
 #include <core/playlist/playlisthandler.h>
 #include <core/scripting/scriptregistry.h>
+#include <gui/fywidget.h>
 #include <gui/guiconstants.h>
+#include <gui/layout/fylayout.h>
+#include <gui/layout/layoutprovider.h>
+#include <gui/playlist/currentplaylistcontroller.h>
+#include <gui/playlist/playlisteditcontroller.h>
+#include <gui/widgetprovider.h>
+#include <gui/widgets/expandedtreeview.h>
 #include <utils/actions/actionmanager.h>
 #include <utils/actions/command.h>
 #include <utils/settings/settingsmanager.h>
@@ -68,18 +75,13 @@
 #include <QTimer>
 #include <QTreeView>
 #include <QtConcurrent/QtConcurrentRun>
+
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
 #include <future>
-#include <gtest/gtest.h>
-#include <gui/fywidget.h>
-#include <gui/layout/fylayout.h>
-#include <gui/layout/layoutprovider.h>
-#include <gui/playlist/currentplaylistcontroller.h>
-#include <gui/playlist/playlisteditcontroller.h>
-#include <gui/widgetprovider.h>
-#include <gui/widgets/expandedtreeview.h>
 #include <mutex>
 #include <thread>
 

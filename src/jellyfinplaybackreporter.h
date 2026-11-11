@@ -23,13 +23,13 @@
 
 #include <core/engine/enginedefs.h>
 #include <core/track.h>
-#include <functional>
 
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 

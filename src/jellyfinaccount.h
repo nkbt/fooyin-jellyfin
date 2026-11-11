@@ -26,8 +26,8 @@
 #include <QPointer>
 #include <QThreadPool>
 #include <QTimer>
-#include <atomic>
 
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <memory>
