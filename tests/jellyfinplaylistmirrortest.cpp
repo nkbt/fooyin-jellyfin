@@ -439,14 +439,18 @@ TEST_F(JellyfinPlaylistMirrorTest, LegacyMappingAdoptsOwnedPlaylistsWithoutSourc
     const int legacyStaleDbId = legacyStale->dbId();
 
     const DbConnectionProvider dbProvider{m_dbPool};
-    for(Playlist* playlist : {legacy, legacyStale}) {
-        playlist->removeExtraProperty(u"core/source-playlist-id"_s);
-        DbQuery removeIdentity{dbProvider.db(),
-                               u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
-        removeIdentity.bindValue(u":extraProperties"_s, playlist->serialiseExtraProperties());
-        removeIdentity.bindValue(u":id"_s, playlist->dbId());
-        ASSERT_TRUE(removeIdentity.exec());
-    }
+    legacy->removeExtraProperty(u"core/source-playlist-id"_s);
+    DbQuery removeLegacyIdentity{dbProvider.db(),
+                                 u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
+    removeLegacyIdentity.bindValue(u":extraProperties"_s, legacy->serialiseExtraProperties());
+    removeLegacyIdentity.bindValue(u":id"_s, legacyDbId);
+    ASSERT_TRUE(removeLegacyIdentity.exec());
+    legacyStale->removeExtraProperty(u"core/source-playlist-id"_s);
+    DbQuery removeLegacyStaleIdentity{
+        dbProvider.db(), u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
+    removeLegacyStaleIdentity.bindValue(u":extraProperties"_s, legacyStale->serialiseExtraProperties());
+    removeLegacyStaleIdentity.bindValue(u":id"_s, legacyStaleDbId);
+    ASSERT_TRUE(removeLegacyStaleIdentity.exec());
     m_settings.fileSet(
         u"Jellyfin/Playlists/"_s + sourceKey,
         QVariantMap{
@@ -478,6 +482,138 @@ TEST_F(JellyfinPlaylistMirrorTest, LegacyMappingAdoptsOwnedPlaylistsWithoutSourc
     EXPECT_EQ(reconstructed.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
     ASSERT_NE(reconstructed.playlistByDbId(legacyDbId), nullptr);
     EXPECT_EQ(titles(reconstructed.playlistByDbId(legacyDbId)), (QStringList{u"track1"_s, u"track2"_s}));
+}
+
+TEST_F(JellyfinPlaylistMirrorTest, RepeatedLegacyAdoptionFailuresKeepMappingForRestartRecovery)
+{
+    ASSERT_TRUE(m_dbInitialised);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    ASSERT_TRUE(m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                            .name            = u"Legacy"_s,
+                                            .tracks          = {makeTrack(u"track1"_s, 1)},
+                                            .playlistItemIds = {u"entry1"_s}}}));
+    Playlist* legacy = m_playlistHandler.playlistByName(u"Legacy"_s);
+    ASSERT_NE(legacy, nullptr);
+    const int legacyDbId = legacy->dbId();
+    const DbConnectionProvider dbProvider{m_dbPool};
+    legacy->removeExtraProperty(u"core/source-playlist-id"_s);
+    DbQuery removeLegacyIdentity{dbProvider.db(),
+                                 u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
+    removeLegacyIdentity.bindValue(u":extraProperties"_s, legacy->serialiseExtraProperties());
+    removeLegacyIdentity.bindValue(u":id"_s, legacyDbId);
+    ASSERT_TRUE(removeLegacyIdentity.exec());
+    m_settings.fileSet(
+        u"Jellyfin/Playlists/"_s + sourceKey,
+        QVariantMap{{u"playlist1"_s, QVariantMap{{u"nativePlaylistDbId"_s, legacyDbId}, {u"name"_s, u"Legacy"_s}}}});
+    const std::vector<MirroredPlaylist> snapshot{{.playlistId = u"playlist1"_s,
+                                                  .name       = u"Legacy"_s,
+                                                  .tracks     = {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
+                                                  .playlistItemIds = {u"entry1"_s, u"entry2"_s}}};
+
+    PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &m_settings};
+    PlaylistMirror restoredMirror{&restored, &m_settings};
+    m_library.loadAllTracks();
+    ASSERT_NE(restored.playlistByDbId(legacyDbId), nullptr);
+    DbQuery failInsert{dbProvider.db(), u"CREATE TRIGGER FailPlaylistTracks BEFORE INSERT ON PlaylistTracks "
+                                        u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
+    ASSERT_TRUE(failInsert.exec());
+    EXPECT_FALSE(restoredMirror.apply(sourceKey, snapshot));
+    EXPECT_TRUE(restored.playlistByDbId(legacyDbId)->sourcePlaylistId().isEmpty());
+    EXPECT_TRUE(m_settings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+    EXPECT_FALSE(restoredMirror.apply(sourceKey, snapshot));
+    EXPECT_TRUE(restored.playlistByDbId(legacyDbId)->sourcePlaylistId().isEmpty());
+    EXPECT_TRUE(m_settings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+    EXPECT_EQ(restored.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
+    DbQuery dropInsert{dbProvider.db(), u"DROP TRIGGER FailPlaylistTracks;"_s};
+    ASSERT_TRUE(dropInsert.exec());
+
+    SettingsManager reloadedSettings{m_dir.filePath(u"settings.ini"_s)};
+    EXPECT_EQ(reloadedSettings.fileValue(u"Jellyfin/Playlists/"_s + sourceKey)
+                  .toMap()
+                  .value(u"playlist1"_s)
+                  .toMap()
+                  .value(u"nativePlaylistDbId"_s)
+                  .toInt(),
+              legacyDbId);
+    PlaylistHandler reconstructed{m_dbPool, m_audioLoader, &m_library, &reloadedSettings};
+    PlaylistMirror reconstructedMirror{&reconstructed, &reloadedSettings};
+    m_library.loadAllTracks();
+    ASSERT_NE(reconstructed.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_TRUE(reconstructed.playlistByDbId(legacyDbId)->sourcePlaylistId().isEmpty());
+    EXPECT_TRUE(reconstructedMirror.apply(sourceKey, snapshot));
+    EXPECT_EQ(reconstructed.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
+    ASSERT_NE(reconstructed.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_EQ(reconstructed.playlistByDbId(legacyDbId)->sourcePlaylistId(), u"playlist1"_s);
+    EXPECT_EQ(titles(reconstructed.playlistByDbId(legacyDbId)), (QStringList{u"track1"_s, u"track2"_s}));
+    EXPECT_FALSE(reloadedSettings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+}
+
+TEST_F(JellyfinPlaylistMirrorTest, FailedLegacyStaleRemovalKeepsMappingForRestartRecovery)
+{
+    ASSERT_TRUE(m_dbInitialised);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    Playlist* local         = m_playlistHandler.createNewPlaylist(u"Local"_s, {makeTrack(u"track1"_s, 1)});
+    ASSERT_NE(local, nullptr);
+    const auto other = m_library.libraryForPath(libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s)));
+    ASSERT_TRUE(other);
+    Playlist* foreign = m_playlistHandler.applyExternalPlaylist(other->path, u"playlist1"_s, {}, u"Other source"_s, {});
+    ASSERT_NE(foreign, nullptr);
+    const int localDbId   = local->dbId();
+    const int foreignDbId = foreign->dbId();
+    ASSERT_TRUE(m_mirror.apply(sourceKey, {{.playlistId      = u"playlist1"_s,
+                                            .name            = u"Legacy"_s,
+                                            .tracks          = {makeTrack(u"track1"_s, 1)},
+                                            .playlistItemIds = {u"entry1"_s}}}));
+    Playlist* legacy = m_playlistHandler.playlistByName(u"Legacy"_s);
+    ASSERT_NE(legacy, nullptr);
+    const int legacyDbId = legacy->dbId();
+    const DbConnectionProvider dbProvider{m_dbPool};
+    legacy->removeExtraProperty(u"core/source-playlist-id"_s);
+    DbQuery removeLegacyIdentity{dbProvider.db(),
+                                 u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
+    removeLegacyIdentity.bindValue(u":extraProperties"_s, legacy->serialiseExtraProperties());
+    removeLegacyIdentity.bindValue(u":id"_s, legacyDbId);
+    ASSERT_TRUE(removeLegacyIdentity.exec());
+    m_settings.fileSet(
+        u"Jellyfin/Playlists/"_s + sourceKey,
+        QVariantMap{{u"playlist1"_s, QVariantMap{{u"nativePlaylistDbId"_s, legacyDbId}, {u"name"_s, u"Legacy"_s}}}});
+
+    PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &m_settings};
+    PlaylistMirror restoredMirror{&restored, &m_settings};
+    m_library.loadAllTracks();
+    ASSERT_NE(restored.playlistByDbId(legacyDbId), nullptr);
+    DbQuery failInsert{dbProvider.db(), u"CREATE TRIGGER FailPlaylistTracks BEFORE INSERT ON PlaylistTracks "
+                                        u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
+    ASSERT_TRUE(failInsert.exec());
+    EXPECT_FALSE(restoredMirror.apply(sourceKey, {{.playlistId = u"playlist1"_s,
+                                                   .name       = u"Legacy"_s,
+                                                   .tracks     = {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
+                                                   .playlistItemIds = {u"entry1"_s, u"entry2"_s}}}));
+    DbQuery failDelete{dbProvider.db(), u"CREATE TRIGGER FailPlaylists BEFORE DELETE ON Playlists "
+                                        u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
+    ASSERT_TRUE(failDelete.exec());
+    EXPECT_FALSE(restoredMirror.apply(sourceKey, {}));
+    ASSERT_NE(restored.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_TRUE(restored.playlistByDbId(legacyDbId)->sourcePlaylistId().isEmpty());
+    EXPECT_TRUE(m_settings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+    DbQuery dropInsert{dbProvider.db(), u"DROP TRIGGER FailPlaylistTracks;"_s};
+    ASSERT_TRUE(dropInsert.exec());
+    DbQuery dropDelete{dbProvider.db(), u"DROP TRIGGER FailPlaylists;"_s};
+    ASSERT_TRUE(dropDelete.exec());
+
+    SettingsManager reloadedSettings{m_dir.filePath(u"settings.ini"_s)};
+    PlaylistHandler reconstructed{m_dbPool, m_audioLoader, &m_library, &reloadedSettings};
+    PlaylistMirror reconstructedMirror{&reconstructed, &reloadedSettings};
+    m_library.loadAllTracks();
+    ASSERT_NE(reconstructed.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_TRUE(reconstructedMirror.apply(sourceKey, {}));
+    EXPECT_EQ(reconstructed.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_TRUE(reconstructed.externalPlaylists(libraryUri(sourceKey)).empty());
+    ASSERT_NE(reconstructed.playlistByDbId(localDbId), nullptr);
+    EXPECT_TRUE(reconstructed.playlistByDbId(localDbId)->sourceLibraryPath().isEmpty());
+    ASSERT_NE(reconstructed.playlistByDbId(foreignDbId), nullptr);
+    EXPECT_EQ(reconstructed.playlistByDbId(foreignDbId)->sourceLibraryPath(), other->path);
+    EXPECT_FALSE(reloadedSettings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
 }
 
 } // namespace Fooyin::Jellyfin::Testing

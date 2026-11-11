@@ -2030,7 +2030,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
      p->m_activePlaylist = playlist;
      Q_EMIT activePlaylistChanged(playlist);
  }
-@@ -1307,6 +1378,141 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
+@@ -1307,6 +1378,144 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
      return p->nextTrackChange(delta, mode);
  }
  
@@ -2095,6 +2095,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
 +            p->updateIndices();
 +        }
 +    };
++    const QString previousSourcePlaylistId{playlist->sourcePlaylistId()};
 +    playlist->setExtraProperty(u"core/source-library-path"_s, sourceLibraryPath);
 +    playlist->setExtraProperty(u"core/source-playlist-id"_s, sourcePlaylistId);
 +    playlist->setExtraProperty(u"core/source-hidden"_s, isPlaylistVisible(playlist->id()) ? QString{} : u"1"_s);
@@ -2124,6 +2125,8 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
 +    }
 +    p->updateIndices();
 +    if(!p->m_playlistConnector.savePlaylist(*playlist) || !transaction.commit()) {
++        // An unsaved source playlist ID would hide the record from legacy adoption on the next attempt.
++        playlist->setExtraProperty(u"core/source-playlist-id"_s, previousSourcePlaylistId);
 +        // The nested save clears these flags even when the outer commit then fails.
 +        playlist->setModified(true);
 +        playlist->setTracksModified(true);
@@ -2172,7 +2175,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
  void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  {
      if(playlistCount() < 1) {
-@@ -1314,7 +1520,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1314,7 +1523,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
      }
  
      auto* playlist = playlistById(id);
@@ -2181,7 +2184,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
          qCDebug(PL_HANDLER) << "Playlist could not be renamed to" << name;
          return;
      }
-@@ -1335,7 +1541,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1335,7 +1544,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  {
      auto* playlist = playlistById(id);
@@ -2191,7 +2194,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
          return;
      }
  
-@@ -1346,7 +1553,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
+@@ -1346,7 +1556,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  void PlaylistHandler::removePlaylist(const UId& id)
  {
      auto* playlist = playlistById(id);
