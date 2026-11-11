@@ -34,7 +34,7 @@ class PlaylistMirror
 public:
     PlaylistMirror(PlaylistHandler* playlistHandler, SettingsManager* settings);
 
-    //! Returns false when a playlist is not stored or removed; its identity is kept for the next apply.
+    //! Returns false when a playlist is not stored or removed; the next apply retries it.
     bool apply(const QString& sourceKey, const std::vector<MirroredPlaylist>& playlists);
 
 private:

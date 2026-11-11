@@ -45,16 +45,21 @@ bool PlaylistMirror::apply(const QString& sourceKey, const std::vector<MirroredP
             return false;
         }
     }
-    QVariantMap previous = m_settings->fileValue(settingsKey(sourceKey)).toMap();
-    QVariantMap current;
+    const QString sourceLibraryPath = libraryUri(sourceKey);
+    QVariantMap legacyEntries       = m_settings->fileValue(settingsKey(sourceKey)).toMap();
+    QVariantMap pendingLegacyEntries;
+    QStringList serverPlaylistIds;
     bool complete{true};
 
     for(const auto& mirrored : playlists) {
-        const QVariantMap storedEntry = previous.take(mirrored.playlistId).toMap();
-        Playlist* playlist = m_playlistHandler->playlistByDbId(storedEntry.value(u"nativePlaylistDbId"_s, -1).toInt());
-        if(playlist && playlist->sourceLibraryPath() != libraryUri(sourceKey)) {
-            playlist = nullptr;
-        }
+        serverPlaylistIds.push_back(mirrored.playlistId);
+        const QVariantMap legacyEntry = legacyEntries.take(mirrored.playlistId).toMap();
+        const Playlist* legacy
+            = m_playlistHandler->playlistByDbId(legacyEntry.value(u"nativePlaylistDbId"_s, -1).toInt());
+        const UId adoptedId
+            = legacy && legacy->sourceLibraryPath() == sourceLibraryPath && legacy->sourcePlaylistId().isEmpty()
+                ? legacy->id()
+                : UId{};
 
         PlaylistTrackList playlistTracks;
         for(size_t index{0}; index < mirrored.tracks.size(); ++index) {
@@ -65,30 +70,43 @@ bool PlaylistMirror::apply(const QString& sourceKey, const std::vector<MirroredP
                                       .entryId         = UId{QUuid::createUuidV5(QUuid{}, identity)},
                                       .indexInPlaylist = static_cast<int>(index)});
         }
-        Playlist* applied = m_playlistHandler->applyExternalPlaylist(
-            libraryUri(sourceKey), playlist ? playlist->id() : UId{}, mirrored.name, playlistTracks);
-        if(!applied) {
+        if(!m_playlistHandler->applyExternalPlaylist(sourceLibraryPath, mirrored.playlistId, adoptedId, mirrored.name,
+                                                     playlistTracks)) {
             complete = false;
-            if(playlist) {
-                current.insert(mirrored.playlistId, storedEntry);
+            if(adoptedId.isValid()) {
+                pendingLegacyEntries.insert(mirrored.playlistId, legacyEntry);
             }
-            continue;
         }
-
-        current.insert(mirrored.playlistId,
-                       QVariantMap{{u"nativePlaylistDbId"_s, applied->dbId()}, {u"name"_s, mirrored.name}});
     }
 
-    for(const auto& [playlistId, stale] : std::as_const(previous).asKeyValueRange()) {
-        const int nativePlaylistDbId = stale.toMap().value(u"nativePlaylistDbId"_s, -1).toInt();
-        Playlist* playlist           = m_playlistHandler->playlistByDbId(nativePlaylistDbId);
-        if(playlist && !m_playlistHandler->removeExternalPlaylist(libraryUri(sourceKey), playlist->id())) {
+    std::vector<UId> staleIds;
+    for(const Playlist* playlist : m_playlistHandler->externalPlaylists(sourceLibraryPath)) {
+        if(!playlist->sourcePlaylistId().isEmpty() && !serverPlaylistIds.contains(playlist->sourcePlaylistId())) {
+            staleIds.push_back(playlist->id());
+        }
+    }
+    for(const UId& staleId : staleIds) {
+        if(!m_playlistHandler->removeExternalPlaylist(sourceLibraryPath, staleId)) {
             complete = false;
-            current.insert(playlistId, stale);
         }
     }
 
-    m_settings->fileSet(settingsKey(sourceKey), current);
+    for(const auto& [playlistId, legacyEntry] : std::as_const(legacyEntries).asKeyValueRange()) {
+        const Playlist* legacy
+            = m_playlistHandler->playlistByDbId(legacyEntry.toMap().value(u"nativePlaylistDbId"_s, -1).toInt());
+        if(legacy && legacy->sourceLibraryPath() == sourceLibraryPath && legacy->sourcePlaylistId().isEmpty()
+           && !m_playlistHandler->removeExternalPlaylist(sourceLibraryPath, legacy->id())) {
+            complete = false;
+            pendingLegacyEntries.insert(playlistId, legacyEntry);
+        }
+    }
+
+    if(pendingLegacyEntries.isEmpty()) {
+        m_settings->fileRemove(settingsKey(sourceKey));
+    }
+    else {
+        m_settings->fileSet(settingsKey(sourceKey), pendingLegacyEntries);
+    }
     return complete;
 }
 } // namespace Fooyin::Jellyfin

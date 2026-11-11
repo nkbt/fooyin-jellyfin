@@ -355,7 +355,7 @@ TEST(JellyfinNativeIntegration, CatalogAndRealDecoderControllerUseConfirmedOccur
     const auto sourceLibrary = application.library()->libraryForPath(track1.filepath());
     ASSERT_TRUE(sourceLibrary);
     Playlist* mirror = application.playlistHandler()->applyExternalPlaylist(
-        sourceLibrary->path, {}, u"Native read-only source playlist"_s,
+        sourceLibrary->path, u"native-source-playlist"_s, {}, u"Native read-only source playlist"_s,
         PlaylistTrack::fromTracks({track1, track2}, {}));
     ASSERT_NE(mirror, nullptr);
     CurrentPlaylistController* playlistController  = gui.playlistController();
@@ -571,9 +571,9 @@ TEST(JellyfinNativeIntegration, PlaylistTabsAndManagerProjectStoredOrderAcrossHi
         handler->removePlaylist(playlist->id());
     }
     auto* z = handler->createNewPlaylist(u"Z"_s);
-    auto* a = handler->applyExternalPlaylist(source->path, {}, u"A"_s, {});
-    auto* b = handler->applyExternalPlaylist(source->path, {}, u"B"_s, {});
-    auto* c = handler->applyExternalPlaylist(source->path, {}, u"C"_s, {});
+    auto* a = handler->applyExternalPlaylist(source->path, u"a"_s, {}, u"A"_s, {});
+    auto* b = handler->applyExternalPlaylist(source->path, u"b"_s, {}, u"B"_s, {});
+    auto* c = handler->applyExternalPlaylist(source->path, u"c"_s, {}, u"C"_s, {});
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
     ASSERT_NE(c, nullptr);

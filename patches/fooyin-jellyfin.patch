@@ -146,30 +146,33 @@ diff --git a/include/core/network/remoteioservice.h b/include/core/network/remot
 diff --git a/include/core/playlist/playlist.h b/include/core/playlist/playlist.h
 --- a/include/core/playlist/playlist.h
 +++ b/include/core/playlist/playlist.h
-@@ -139,6 +139,7 @@ public:
+@@ -139,6 +139,8 @@ public:
      [[nodiscard]] bool isAutoPlaylist() const;
      /** Returns @c true if changes to this playlist's contents are disabled. */
      [[nodiscard]] bool isLocked() const;
 +    [[nodiscard]] QString sourceLibraryPath() const;
++    [[nodiscard]] QString sourcePlaylistId() const;
      /** Returns the query used to generate this autoplaylist, else an empty string. */
      [[nodiscard]] QString query() const;
      /** Returns the optional sort pattern used to order this autoplaylist. */
 diff --git a/include/core/playlist/playlisthandler.h b/include/core/playlist/playlisthandler.h
 --- a/include/core/playlist/playlisthandler.h
 +++ b/include/core/playlist/playlisthandler.h
-@@ -127,6 +127,11 @@ public:
+@@ -127,6 +127,13 @@ public:
      /** Advances and returns a track relative to the current index in the active playlist. */
      [[nodiscard]] PlaylistTrack advanceRelativeTrack(Playlist::PlayModes mode, int delta = 1);
  
-+    /** Stores the source playlist atomically. Returns nullptr when nothing is stored. */
-+    Playlist* applyExternalPlaylist(const QString& sourceLibraryPath, const UId& id, const QString& name,
-+                                    const PlaylistTrackList& playlistTracks);
++    /** Returns the playlists owned by the source at @p sourceLibraryPath, including hidden ones. */
++    [[nodiscard]] PlaylistList externalPlaylists(const QString& sourceLibraryPath) const;
++    /** Stores or adopts an owned source playlist atomically; returns nullptr on failure. */
++    Playlist* applyExternalPlaylist(const QString& sourceLibraryPath, const QString& sourcePlaylistId,
++                                    const UId& adoptedId, const QString& name, const PlaylistTrackList& playlistTracks);
 +    /** Returns false when the source playlist with @p id remains stored. */
 +    bool removeExternalPlaylist(const QString& sourceLibraryPath, const UId& id);
      void renamePlaylist(const UId& id, const QString& name);
      /** Enables or disables changes to the contents of the playlist with @p id. */
      void setPlaylistLocked(const UId& id, bool locked);
-@@ -141,6 +146,7 @@ public:
+@@ -141,6 +148,7 @@ public:
      [[nodiscard]] Playlist* activePlaylist() const;
  
      [[nodiscard]] int playlistCount() const;
@@ -1812,7 +1815,7 @@ diff --git a/src/core/playback/playercontroller.cpp b/src/core/playback/playerco
 diff --git a/src/core/playlist/playlist.cpp b/src/core/playlist/playlist.cpp
 --- a/src/core/playlist/playlist.cpp
 +++ b/src/core/playlist/playlist.cpp
-@@ -989,7 +989,13 @@ bool Playlist::isLocked() const
+@@ -989,7 +989,19 @@ bool Playlist::isLocked() const
  {
      assertMainThread();
  
@@ -1824,6 +1827,12 @@ diff --git a/src/core/playlist/playlist.cpp b/src/core/playlist/playlist.cpp
 +{
 +    assertMainThread();
 +    return p->m_extraProps.value("core/source-library-path"_L1);
++}
++
++QString Playlist::sourcePlaylistId() const
++{
++    assertMainThread();
++    return p->m_extraProps.value("core/source-playlist-id"_L1);
  }
  
  QString Playlist::query() const
@@ -2021,13 +2030,28 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
      p->m_activePlaylist = playlist;
      Q_EMIT activePlaylistChanged(playlist);
  }
-@@ -1307,6 +1378,112 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
+@@ -1307,6 +1378,141 @@ PlaylistTrack PlaylistHandler::advanceRelativeTrack(Playlist::PlayModes mode, in
      return p->nextTrackChange(delta, mode);
  }
  
-+Playlist* PlaylistHandler::applyExternalPlaylist(const QString& sourceLibraryPath, const UId& id, const QString& name,
++PlaylistList PlaylistHandler::externalPlaylists(const QString& sourceLibraryPath) const
++{
++    PlaylistList playlists;
++    for(const auto& playlist : p->m_playlists) {
++        if(!sourceLibraryPath.isEmpty() && playlist->sourceLibraryPath() == sourceLibraryPath) {
++            playlists.emplace_back(playlist.get());
++        }
++    }
++    return playlists;
++}
++
++Playlist* PlaylistHandler::applyExternalPlaylist(const QString& sourceLibraryPath, const QString& sourcePlaylistId,
++                                                 const UId& adoptedId, const QString& name,
 +                                                 const PlaylistTrackList& playlistTracks)
 +{
++    if(sourcePlaylistId.isEmpty()) {
++        return nullptr;
++    }
 +    const auto library = p->m_library->libraryForPath(sourceLibraryPath);
 +    if(!library || library->path != sourceLibraryPath || !Track::isVirtualPath(sourceLibraryPath)) {
 +        return nullptr;
@@ -2040,9 +2064,19 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
 +            return nullptr;
 +        }
 +    }
-+    Playlist* playlist = playlistById(id);
-+    if(playlist && playlist->sourceLibraryPath() != sourceLibraryPath) {
-+        return nullptr;
++    Playlist* playlist{nullptr};
++    for(Playlist* owned : externalPlaylists(sourceLibraryPath)) {
++        if(owned->sourcePlaylistId() == sourcePlaylistId) {
++            if(playlist) {
++                return nullptr;
++            }
++            playlist = owned;
++        }
++    }
++    if(Playlist* adopted = playlistById(adoptedId); !playlist && adopted
++                                                    && adopted->sourceLibraryPath() == sourceLibraryPath
++                                                    && adopted->sourcePlaylistId().isEmpty()) {
++        playlist = adopted;
 +    }
 +    DbTransaction transaction{p->m_playlistConnector.db()};
 +    if(!transaction) {
@@ -2062,6 +2096,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
 +        }
 +    };
 +    playlist->setExtraProperty(u"core/source-library-path"_s, sourceLibraryPath);
++    playlist->setExtraProperty(u"core/source-playlist-id"_s, sourcePlaylistId);
 +    playlist->setExtraProperty(u"core/source-hidden"_s, isPlaylistVisible(playlist->id()) ? QString{} : u"1"_s);
 +    PlaylistTrackList sourcePlaylistTracks{playlistTracks};
 +    for(PlaylistTrack& playlistTrack : sourcePlaylistTracks) {
@@ -2089,6 +2124,9 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
 +    }
 +    p->updateIndices();
 +    if(!p->m_playlistConnector.savePlaylist(*playlist) || !transaction.commit()) {
++        // The nested save clears these flags even when the outer commit then fails.
++        playlist->setModified(true);
++        playlist->setTracksModified(true);
 +        playlist->setName(previousName);
 +        discardAdded();
 +        return nullptr;
@@ -2134,7 +2172,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
  void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  {
      if(playlistCount() < 1) {
-@@ -1314,7 +1491,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1314,7 +1520,7 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
      }
  
      auto* playlist = playlistById(id);
@@ -2143,7 +2181,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
          qCDebug(PL_HANDLER) << "Playlist could not be renamed to" << name;
          return;
      }
-@@ -1335,7 +1512,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
+@@ -1335,7 +1541,8 @@ void PlaylistHandler::renamePlaylist(const UId& id, const QString& name)
  void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  {
      auto* playlist = playlistById(id);
@@ -2153,7 +2191,7 @@ diff --git a/src/core/playlist/playlisthandler.cpp b/src/core/playlist/playlisth
          return;
      }
  
-@@ -1346,7 +1524,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
+@@ -1346,7 +1553,7 @@ void PlaylistHandler::setPlaylistLocked(const UId& id, bool locked)
  void PlaylistHandler::removePlaylist(const UId& id)
  {
      auto* playlist = playlistById(id);
@@ -3494,7 +3532,7 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
  class FakeLibraryReader : public Fooyin::AudioReader
  {
  public:
-@@ -1241,3 +1289,1085 @@ TEST_F(UnifiedMusicLibraryTest, RestoresStatsWhenUnmanagedTrackIsReadded)
+@@ -1241,3 +1289,1196 @@ TEST_F(UnifiedMusicLibraryTest, RestoresStatsWhenUnmanagedTrackIsReadded)
      EXPECT_EQ(tracks.front().lastPlayed(), 500);
  }
  } // namespace Fooyin::Testing
@@ -4168,8 +4206,8 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +        *library, {externalTrack(u"test-source://account/item"_s, u"Title"_s)}, QUuid::createUuid());
 +    ASSERT_TRUE(waitForSignal(applied).at(2).toBool());
 +    const Track track = context().library.libraryTracks().front();
-+    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(library->path, {}, u"Server playlist"_s,
-+                                                                        PlaylistTrack::fromTracks({track, track}, {}));
++    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(
++        library->path, u"server-playlist"_s, {}, u"Server playlist"_s, PlaylistTrack::fromTracks({track, track}, {}));
 +    ASSERT_NE(mirror, nullptr);
 +    const UId mirrorId = mirror->id();
 +    Playlist* local    = context().playlistHandler.createNewPlaylist(u"Local playlist"_s, {track});
@@ -4184,7 +4222,7 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +    EXPECT_EQ(mirror->trackCount(), 2);
 +    EXPECT_EQ(mirror->name(), u"Server playlist"_s);
 +    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), mirror);
-+    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Refreshed"_s,
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {}, u"Refreshed"_s,
 +                                                              PlaylistTrack::fromTracks({track}, {})),
 +              mirror);
 +    EXPECT_EQ(mirror->trackCount(), 1);
@@ -4200,7 +4238,8 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +    EXPECT_NE(std::ranges::find(visibleAfterActivation, mirror), visibleAfterActivation.end());
 +    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), mirror);
 +    context().library.setExternalLibraryActive(*library, false);
-+    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Hidden update"_s,
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {},
++                                                              u"Hidden update"_s,
 +                                                              PlaylistTrack::fromTracks({track, track}, {})),
 +              mirror);
 +    EXPECT_FALSE(context().playlistHandler.isPlaylistVisible(mirrorId));
@@ -4244,8 +4283,8 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +        *library, {externalTrack(u"test-source://failing/item"_s, u"Title"_s)}, QUuid::createUuid());
 +    ASSERT_TRUE(waitForSignal(applied).at(2).toBool());
 +    const Track track = context().library.libraryTracks().front();
-+    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(library->path, {}, u"Server playlist"_s,
-+                                                                        PlaylistTrack::fromTracks({track}, {}));
++    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(
++        library->path, u"server-playlist"_s, {}, u"Server playlist"_s, PlaylistTrack::fromTracks({track}, {}));
 +    ASSERT_NE(mirror, nullptr);
 +    const UId mirrorId             = mirror->id();
 +    const int mirrorDbId           = mirror->dbId();
@@ -4268,11 +4307,11 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +                                                u"BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;"_s};
 +    ASSERT_TRUE(failDelete.exec()) << failDelete.lastError().text().toStdString();
 +
-+    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, {}, u"New playlist"_s,
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"new-playlist"_s, {}, u"New playlist"_s,
 +                                                              PlaylistTrack::fromTracks({track}, {})),
 +              nullptr);
 +    EXPECT_EQ(context().playlistHandler.playlists().size(), playlistCount);
-+    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Renamed"_s,
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {}, u"Renamed"_s,
 +                                                              PlaylistTrack::fromTracks({track, track}, {})),
 +              nullptr);
 +    EXPECT_EQ(mirror->name(), u"Server playlist"_s);
@@ -4294,7 +4333,7 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->trackCount(), 1);
 +    }
 +
-+    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, mirrorId, u"Renamed"_s,
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {}, u"Renamed"_s,
 +                                                              PlaylistTrack::fromTracks({track, track}, {})),
 +              mirror);
 +    EXPECT_EQ(mirror->name(), u"Renamed"_s);
@@ -4310,6 +4349,116 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +    }
 +    EXPECT_TRUE(context().playlistHandler.removeExternalPlaylist(library->path, mirrorId));
 +    EXPECT_EQ(context().playlistHandler.playlistById(mirrorId), nullptr);
++}
++
++TEST_F(UnifiedMusicLibraryTest, ExternalPlaylistOuterCommitFailureKeepsChangesForExactRetry)
++{
++    const auto library = context().library.addExternalLibrary(u"test-source://commit-failure"_s, u"Account"_s);
++    ASSERT_TRUE(library);
++    QSignalSpy applied{&context().library, &MusicLibrary::externalLibrarySnapshotFinished};
++    context().library.applyExternalLibrarySnapshot(
++        *library,
++        {externalTrack(u"test-source://commit-failure/first"_s, u"First"_s),
++         externalTrack(u"test-source://commit-failure/second"_s, u"Second"_s)},
++        QUuid::createUuid());
++    ASSERT_TRUE(waitForSignal(applied).at(2).toBool());
++    const TrackList tracks = context().library.libraryTracks();
++    ASSERT_EQ(tracks.size(), 2U);
++    const UId firstEntryId{QUuid::createUuid()};
++    const UId secondEntryId{QUuid::createUuid()};
++    Playlist* mirror = context().playlistHandler.applyExternalPlaylist(
++        library->path, u"server-playlist"_s, {}, u"Server playlist"_s,
++        {{.track = tracks.at(0), .playlistId = {}, .entryId = firstEntryId, .indexInPlaylist = 0}});
++    ASSERT_NE(mirror, nullptr);
++    const int mirrorDbId = mirror->dbId();
++    const PlaylistTrackList updatedTracks{
++        {.track = tracks.at(1), .playlistId = {}, .entryId = secondEntryId, .indexInPlaylist = 0},
++        {.track = tracks.at(0), .playlistId = {}, .entryId = firstEntryId, .indexInPlaylist = 1}};
++
++    const Fooyin::DbConnectionProvider dbProvider{context().dbPool};
++    const auto execute = [&dbProvider](const QString& statement) {
++        Fooyin::DbQuery query{dbProvider.db(), statement};
++        const bool executed = query.exec();
++        EXPECT_TRUE(executed) << query.lastError().text().toStdString();
++        return executed;
++    };
++    // A deferred foreign key passes the nested savepoint and fails only the outermost release.
++    ASSERT_TRUE(execute(u"CREATE TABLE CommitFaultParent (ID INTEGER PRIMARY KEY);"_s));
++    ASSERT_TRUE(execute(u"CREATE TABLE CommitFault (ParentID INTEGER REFERENCES CommitFaultParent(ID) "
++                        u"DEFERRABLE INITIALLY DEFERRED);"_s));
++    ASSERT_TRUE(execute(u"CREATE TRIGGER FailCommit AFTER UPDATE ON Playlists "
++                        u"BEGIN INSERT INTO CommitFault VALUES (1); END;"_s));
++
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {},
++                                                              u"Server playlist"_s, updatedTracks),
++              nullptr);
++    {
++        PlaylistHandler restored{context().dbPool, context().audioLoader, &context().library, &context().settings};
++        QSignalSpy loaded{&context().library, &MusicLibrary::tracksLoaded};
++        context().library.loadAllTracks();
++        waitForSignal(loaded);
++        ASSERT_NE(restored.playlistByDbId(mirrorDbId), nullptr);
++        EXPECT_EQ(restored.playlistByDbId(mirrorDbId)->trackCount(), 1);
++    }
++
++    ASSERT_TRUE(execute(u"DROP TRIGGER FailCommit;"_s));
++    ASSERT_TRUE(execute(u"DROP TABLE CommitFault;"_s));
++    ASSERT_TRUE(execute(u"DROP TABLE CommitFaultParent;"_s));
++    EXPECT_EQ(context().playlistHandler.applyExternalPlaylist(library->path, u"server-playlist"_s, {},
++                                                              u"Server playlist"_s, updatedTracks),
++              mirror);
++    {
++        PlaylistHandler restored{context().dbPool, context().audioLoader, &context().library, &context().settings};
++        QSignalSpy loaded{&context().library, &MusicLibrary::tracksLoaded};
++        context().library.loadAllTracks();
++        waitForSignal(loaded);
++        const Playlist* stored = restored.playlistByDbId(mirrorDbId);
++        ASSERT_NE(stored, nullptr);
++        EXPECT_EQ(stored->name(), u"Server playlist"_s);
++        EXPECT_EQ(stored->sourcePlaylistId(), u"server-playlist"_s);
++        EXPECT_EQ(stored->extraProperties().value(u"core/source-playlist-entries"_s),
++                  mirror->extraProperties().value(u"core/source-playlist-entries"_s));
++        const PlaylistTrackList storedTracks = stored->playlistTracks();
++        ASSERT_EQ(storedTracks.size(), 2U);
++        EXPECT_EQ(storedTracks.at(0).track.id(), tracks.at(1).id());
++        EXPECT_EQ(storedTracks.at(0).entryId, secondEntryId);
++        EXPECT_EQ(storedTracks.at(1).track.id(), tracks.at(0).id());
++        EXPECT_EQ(storedTracks.at(1).entryId, firstEntryId);
++    }
++}
++
++TEST_F(UnifiedMusicLibraryTest, ExternalPlaylistIdentityAdoptsOnlyOwnedPlaylistsWithoutSourcePlaylistId)
++{
++    const auto library = context().library.addExternalLibrary(u"test-source://identity"_s, u"Account"_s);
++    const auto other   = context().library.addExternalLibrary(u"test-source://other-identity"_s, u"Other"_s);
++    ASSERT_TRUE(library);
++    ASSERT_TRUE(other);
++    PlaylistHandler& handler = context().playlistHandler;
++    Playlist* foreign        = handler.applyExternalPlaylist(other->path, u"foreign"_s, {}, u"Foreign"_s, {});
++    Playlist* local          = handler.createPlaylist(u"Local"_s, {});
++    ASSERT_NE(foreign, nullptr);
++    ASSERT_NE(local, nullptr);
++
++    Playlist* foreignAdoption = handler.applyExternalPlaylist(library->path, u"first"_s, foreign->id(), u"First"_s, {});
++    ASSERT_NE(foreignAdoption, nullptr);
++    EXPECT_NE(foreignAdoption, foreign);
++    EXPECT_EQ(foreign->sourceLibraryPath(), other->path);
++    EXPECT_NE(handler.applyExternalPlaylist(library->path, u"second"_s, local->id(), u"Second"_s, {}), local);
++    EXPECT_TRUE(local->sourceLibraryPath().isEmpty());
++
++    EXPECT_EQ(handler.applyExternalPlaylist(library->path, u"first"_s, {}, u"First renamed"_s, {}), foreignAdoption);
++    EXPECT_NE(handler.applyExternalPlaylist(library->path, u"third"_s, foreignAdoption->id(), u"Third"_s, {}),
++              foreignAdoption);
++    EXPECT_EQ(foreignAdoption->sourcePlaylistId(), u"first"_s);
++    EXPECT_EQ(handler.applyExternalPlaylist(library->path, {}, {}, u"Missing"_s, {}), nullptr);
++    EXPECT_EQ(handler.externalPlaylists(library->path).size(), 3U);
++
++    Playlist* third = handler.playlistByName(u"Third"_s);
++    ASSERT_NE(third, nullptr);
++    third->setExtraProperty(u"core/source-playlist-id"_s, u"first"_s);
++    EXPECT_EQ(handler.applyExternalPlaylist(library->path, u"first"_s, {}, u"Ambiguous"_s, {}), nullptr);
++    EXPECT_EQ(foreignAdoption->name(), u"First renamed"_s);
++    EXPECT_EQ(third->name(), u"Third"_s);
 +}
 +
 +TEST_F(UnifiedMusicLibraryTest, ExternalSnapshotAcknowledgesEachExactOperationOnce)
@@ -4454,7 +4603,7 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +        *source, {externalTrack(u"test-source://playback/item"_s, u"Title"_s)}, QUuid::createUuid());
 +    ASSERT_TRUE(waitForSignal(applied).at(2).toBool());
 +    const Track track = context().library.libraryTracks().front();
-+    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(source->path, {}, u"Owned"_s,
++    Playlist* mirror  = context().playlistHandler.applyExternalPlaylist(source->path, u"owned"_s, {}, u"Owned"_s,
 +                                                                        PlaylistTrack::fromTracks({track}, {}));
 +    ASSERT_NE(mirror, nullptr);
 +    Playlist* local = context().playlistHandler.createNewPlaylist(u"Local references"_s, {track});
@@ -4503,9 +4652,9 @@ diff --git a/tests/core/library/unifiedmusiclibrarytest.cpp b/tests/core/library
 +        handler.removePlaylist(playlist->id());
 +    }
 +    auto* z = handler.createNewPlaylist(u"Z"_s);
-+    auto* a = handler.applyExternalPlaylist(source->path, {}, u"A"_s, {});
-+    auto* b = handler.applyExternalPlaylist(source->path, {}, u"B"_s, {});
-+    auto* c = handler.applyExternalPlaylist(source->path, {}, u"C"_s, {});
++    auto* a = handler.applyExternalPlaylist(source->path, u"a"_s, {}, u"A"_s, {});
++    auto* b = handler.applyExternalPlaylist(source->path, u"b"_s, {}, u"B"_s, {});
++    auto* c = handler.applyExternalPlaylist(source->path, u"c"_s, {}, u"C"_s, {});
 +    ASSERT_NE(a, nullptr);
 +    ASSERT_NE(b, nullptr);
 +    ASSERT_NE(c, nullptr);

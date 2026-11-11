@@ -354,7 +354,8 @@ TEST_F(JellyfinPlaylistMirrorTest, CorruptMappingCannotTakeOverLocalOrAnotherSou
     ASSERT_NE(local, nullptr);
     const auto other = m_library.libraryForPath(libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s)));
     ASSERT_TRUE(other);
-    Playlist* foreign = m_playlistHandler.applyExternalPlaylist(other->path, {}, u"Other source"_s, {});
+    Playlist* foreign
+        = m_playlistHandler.applyExternalPlaylist(other->path, u"other-source"_s, {}, u"Other source"_s, {});
     ASSERT_NE(foreign, nullptr);
     m_settings.fileSet(u"Jellyfin/Playlists/"_s + sourceKey,
                        QVariantMap{{u"playlist1"_s, QVariantMap{{u"nativePlaylistDbId"_s, local->dbId()}}},
@@ -371,6 +372,112 @@ TEST_F(JellyfinPlaylistMirrorTest, CorruptMappingCannotTakeOverLocalOrAnotherSou
     ASSERT_NE(remote, nullptr);
     EXPECT_NE(remote->dbId(), local->dbId());
     EXPECT_EQ(remote->sourceLibraryPath(), libraryUri(sourceKey));
+}
+
+TEST_F(JellyfinPlaylistMirrorTest, LostSettingsKeepDurableIdentityAndProtectOtherPlaylists)
+{
+    ASSERT_TRUE(m_dbInitialised);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    Playlist* local         = m_playlistHandler.createNewPlaylist(u"Local"_s, {makeTrack(u"track1"_s, 1)});
+    ASSERT_NE(local, nullptr);
+    const auto other = m_library.libraryForPath(libraryUri(Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user2"_s)));
+    ASSERT_TRUE(other);
+    Playlist* foreign = m_playlistHandler.applyExternalPlaylist(other->path, u"playlist2"_s, {}, u"Other source"_s, {});
+    ASSERT_NE(foreign, nullptr);
+    const int localDbId   = local->dbId();
+    const int foreignDbId = foreign->dbId();
+    const std::vector<MirroredPlaylist> snapshot{{.playlistId      = u"playlist1"_s,
+                                                  .name            = u"Alpha"_s,
+                                                  .tracks          = {makeTrack(u"track1"_s, 1)},
+                                                  .playlistItemIds = {u"entry1"_s}},
+                                                 {.playlistId      = u"playlist2"_s,
+                                                  .name            = u"Beta"_s,
+                                                  .tracks          = {makeTrack(u"track2"_s, 2)},
+                                                  .playlistItemIds = {u"entry2"_s}}};
+    ASSERT_TRUE(m_mirror.apply(sourceKey, snapshot));
+    const int alphaDbId = m_playlistHandler.playlistByName(u"Alpha"_s)->dbId();
+    const int betaDbId  = m_playlistHandler.playlistByName(u"Beta"_s)->dbId();
+    m_playlistHandler.savePlaylists();
+
+    SettingsManager lostSettings{m_dir.filePath(u"lost-settings.ini"_s)};
+    PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &lostSettings};
+    PlaylistMirror restoredMirror{&restored, &lostSettings};
+    m_library.loadAllTracks();
+    EXPECT_TRUE(restoredMirror.apply(sourceKey, snapshot));
+    EXPECT_EQ(restored.externalPlaylists(libraryUri(sourceKey)).size(), 2U);
+    ASSERT_NE(restored.playlistByDbId(alphaDbId), nullptr);
+    EXPECT_EQ(restored.playlistByDbId(alphaDbId)->sourcePlaylistId(), u"playlist1"_s);
+    ASSERT_NE(restored.playlistByDbId(betaDbId), nullptr);
+    EXPECT_EQ(restored.playlistByDbId(betaDbId)->sourcePlaylistId(), u"playlist2"_s);
+
+    EXPECT_TRUE(restoredMirror.apply(sourceKey, {snapshot.front()}));
+    EXPECT_EQ(restored.playlistByDbId(betaDbId), nullptr);
+    ASSERT_NE(restored.playlistByDbId(alphaDbId), nullptr);
+    EXPECT_EQ(restored.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
+    ASSERT_NE(restored.playlistByDbId(localDbId), nullptr);
+    EXPECT_TRUE(restored.playlistByDbId(localDbId)->sourceLibraryPath().isEmpty());
+    ASSERT_NE(restored.playlistByDbId(foreignDbId), nullptr);
+    EXPECT_EQ(restored.playlistByDbId(foreignDbId)->sourceLibraryPath(), other->path);
+    EXPECT_FALSE(lostSettings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+}
+
+TEST_F(JellyfinPlaylistMirrorTest, LegacyMappingAdoptsOwnedPlaylistsWithoutSourcePlaylistId)
+{
+    ASSERT_TRUE(m_dbInitialised);
+    const QString sourceKey = Fooyin::Jellyfin::sourceKey(u"server1"_s, u"user1"_s);
+    ASSERT_TRUE(m_mirror.apply(
+        sourceKey, {{.playlistId      = u"playlist1"_s,
+                     .name            = u"Legacy"_s,
+                     .tracks          = {makeTrack(u"track1"_s, 1)},
+                     .playlistItemIds = {u"entry1"_s}},
+                    {.playlistId = u"playlist2"_s, .name = u"Legacy stale"_s, .tracks = {}, .playlistItemIds = {}}}));
+    Playlist* legacy      = m_playlistHandler.playlistByName(u"Legacy"_s);
+    Playlist* legacyStale = m_playlistHandler.playlistByName(u"Legacy stale"_s);
+    ASSERT_NE(legacy, nullptr);
+    ASSERT_NE(legacyStale, nullptr);
+    const int legacyDbId      = legacy->dbId();
+    const int legacyStaleDbId = legacyStale->dbId();
+
+    const DbConnectionProvider dbProvider{m_dbPool};
+    for(Playlist* playlist : {legacy, legacyStale}) {
+        playlist->removeExtraProperty(u"core/source-playlist-id"_s);
+        DbQuery removeIdentity{dbProvider.db(),
+                               u"UPDATE Playlists SET ExtraProperties = :extraProperties WHERE PlaylistID = :id;"_s};
+        removeIdentity.bindValue(u":extraProperties"_s, playlist->serialiseExtraProperties());
+        removeIdentity.bindValue(u":id"_s, playlist->dbId());
+        ASSERT_TRUE(removeIdentity.exec());
+    }
+    m_settings.fileSet(
+        u"Jellyfin/Playlists/"_s + sourceKey,
+        QVariantMap{
+            {u"playlist1"_s, QVariantMap{{u"nativePlaylistDbId"_s, legacyDbId}, {u"name"_s, u"Legacy"_s}}},
+            {u"playlist2"_s, QVariantMap{{u"nativePlaylistDbId"_s, legacyStaleDbId}, {u"name"_s, u"Legacy stale"_s}}}});
+
+    PlaylistHandler restored{m_dbPool, m_audioLoader, &m_library, &m_settings};
+    PlaylistMirror restoredMirror{&restored, &m_settings};
+    m_library.loadAllTracks();
+    ASSERT_NE(restored.playlistByDbId(legacyDbId), nullptr);
+    ASSERT_TRUE(restored.playlistByDbId(legacyDbId)->sourcePlaylistId().isEmpty());
+    const std::vector<MirroredPlaylist> snapshot{{.playlistId = u"playlist1"_s,
+                                                  .name       = u"Legacy"_s,
+                                                  .tracks     = {makeTrack(u"track1"_s, 1), makeTrack(u"track2"_s, 2)},
+                                                  .playlistItemIds = {u"entry1"_s, u"entry2"_s}}};
+    EXPECT_TRUE(restoredMirror.apply(sourceKey, snapshot));
+    ASSERT_NE(restored.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_EQ(restored.playlistByDbId(legacyDbId)->sourcePlaylistId(), u"playlist1"_s);
+    EXPECT_EQ(titles(restored.playlistByDbId(legacyDbId)), (QStringList{u"track1"_s, u"track2"_s}));
+    EXPECT_EQ(restored.playlistByDbId(legacyStaleDbId), nullptr);
+    EXPECT_EQ(restored.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
+    EXPECT_FALSE(m_settings.fileContains(u"Jellyfin/Playlists/"_s + sourceKey));
+
+    SettingsManager lostSettings{m_dir.filePath(u"lost-settings.ini"_s)};
+    PlaylistHandler reconstructed{m_dbPool, m_audioLoader, &m_library, &lostSettings};
+    PlaylistMirror reconstructedMirror{&reconstructed, &lostSettings};
+    m_library.loadAllTracks();
+    EXPECT_TRUE(reconstructedMirror.apply(sourceKey, snapshot));
+    EXPECT_EQ(reconstructed.externalPlaylists(libraryUri(sourceKey)).size(), 1U);
+    ASSERT_NE(reconstructed.playlistByDbId(legacyDbId), nullptr);
+    EXPECT_EQ(titles(reconstructed.playlistByDbId(legacyDbId)), (QStringList{u"track1"_s, u"track2"_s}));
 }
 
 } // namespace Fooyin::Jellyfin::Testing
