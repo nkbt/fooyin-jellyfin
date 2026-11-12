@@ -19,6 +19,7 @@
 
 #include "jellyfincatalogsync.h"
 
+#include "jellyfinfavouritesync.h"
 #include "jellyfinrequest.h"
 
 #include <core/library/musiclibrary.h>
@@ -63,11 +64,12 @@ std::optional<QJsonObject> replyObject(QNetworkReply* reply)
 } // namespace
 
 CatalogSync::CatalogSync(QNetworkAccessManager* network, MusicLibrary* library, std::shared_ptr<AccessRegistry> access,
-                         QObject* parent)
+                         FavouriteSync* favourites, QObject* parent)
     : QObject{parent}
     , m_network{network}
     , m_library{library}
     , m_access{std::move(access)}
+    , m_favourites{favourites}
 {
     QObject::connect(m_library, &MusicLibrary::externalLibrarySnapshotFinished, this,
                      &CatalogSync::handleSnapshotApplied);
@@ -83,10 +85,11 @@ void CatalogSync::start(const QString& libraryName)
         return;
     }
 
-    m_running     = true;
-    m_runAccess   = *access;
-    m_libraryName = libraryName;
-    m_totalTracks = -1;
+    m_running           = true;
+    m_runAccess         = *access;
+    m_favouriteSequence = m_favourites->sequence();
+    m_libraryName       = libraryName;
+    m_totalTracks       = -1;
     m_items.clear();
     m_playlists.clear();
     m_playlistIndex = 0;
@@ -360,6 +363,7 @@ void CatalogSync::applySnapshot()
         }
     }
 
+    m_favourites->reconcileSnapshot(m_runAccess, *library, tracks, m_favouriteSequence);
     m_library->setExternalLibraryReadOnlyStats(*library, Track::Stat::Loved);
     m_libraryId        = library->id;
     m_awaitingSnapshot = true;

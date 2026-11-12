@@ -21,6 +21,7 @@
 
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
+#include "jellyfinfavouritesync.h"
 #include "jellyfintrack.h"
 #include "testsupport.h"
 
@@ -139,7 +140,8 @@ class JellyfinCatalogSyncTest : public testing::Test
 protected:
     JellyfinCatalogSyncTest()
         : m_access{std::make_shared<AccessRegistry>()}
-        , m_sync{&m_network, &m_library, m_access, nullptr}
+        , m_favourites{&m_network, &m_library, m_access, nullptr}
+        , m_sync{&m_network, &m_library, m_access, &m_favourites, nullptr}
         , m_scenario{std::make_shared<CatalogScenario>()}
     {
         m_server.setHandler(catalogHandler(m_scenario));
@@ -168,6 +170,7 @@ protected:
     std::shared_ptr<AccessRegistry> m_access;
     QNetworkAccessManager m_network;
     FakeJellyfinServer m_server;
+    FavouriteSync m_favourites;
     CatalogSync m_sync;
     std::shared_ptr<CatalogScenario> m_scenario;
 };

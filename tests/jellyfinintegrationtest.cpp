@@ -20,8 +20,12 @@
 #include "fakejellyfinserver.h"
 #include "jellyfinaccess.h"
 #include "jellyfincatalogsync.h"
+#include "jellyfinfavouritebanner.h"
+#include "jellyfinfavouritesync.h"
 #include "jellyfininput.h"
 #include "jellyfinplaybackreporter.h"
+#include "jellyfintrack.h"
+#include "testsupport.h"
 
 #include "core/application.h"
 #include "core/engine/input/ffmpeg/ffmpeginput.h"
@@ -43,10 +47,13 @@
 #include <gui/layout/layoutprovider.h>
 #include <gui/playlist/currentplaylistcontroller.h>
 #include <gui/playlist/playlisteditcontroller.h>
+#include <gui/trackselectioncontroller.h>
 #include <gui/widgetprovider.h>
 #include <gui/widgets/expandedtreeview.h>
+#include <gui/widgets/messagebanner.h>
 #include <utils/actions/actionmanager.h>
 #include <utils/actions/command.h>
+#include <utils/actions/widgetcontext.h>
 #include <utils/settings/settingsmanager.h>
 
 #include <QAbstractItemModelTester>
@@ -60,6 +67,8 @@
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLineEdit>
+#include <QMainWindow>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QScopeGuard>
@@ -298,7 +307,8 @@ TEST(JellyfinNativeIntegration, CatalogAndRealDecoderControllerUseConfirmedOccur
         },
         0);
     QNetworkAccessManager network;
-    CatalogSync sync{&network, application.library(), access, nullptr};
+    FavouriteSync favourites{&network, application.library(), access, nullptr};
+    CatalogSync sync{&network, application.library(), access, &favourites, nullptr};
     QSignalSpy synchronised{&sync, &CatalogSync::finished};
     sync.start(u"Synthetic source"_s);
     ASSERT_TRUE(QTest::qWaitFor([&]() { return !synchronised.isEmpty(); }, 10000));
@@ -623,6 +633,166 @@ TEST(JellyfinNativeIntegration, PlaylistTabsAndManagerProjectStoredOrderAcrossHi
     application.library()->setExternalLibraryActive(*source, true);
     assertProjection();
     handler->savePlaylists();
+}
+TEST(JellyfinNativeIntegration, LoveActionsEditJellyfinFavouritesAndReportFailuresInABanner)
+{
+    constexpr auto TokenSentinel = "synthetic-favourite-token";
+    constexpr auto BodySentinel  = "synthetic-favourite-body";
+    Application application;
+    application.settingsManager()->set<Settings::Core::FirstRun>(false);
+    application.pluginManager()->findPlugins(
+        {QFileInfo(QString::fromUtf8(JELLYFIN_HOST_CORE_LIBRARY)).dir().filePath(u"plugins"_s)});
+    GuiApplication gui{&application};
+    const QByteArray screenshot = qgetenv("JELLYFIN_FAVOURITE_SCREENSHOT");
+    if(!screenshot.isEmpty()) {
+        const QJsonObject playlist{{u"SingleMode"_s, false}, {u"Columns"_s, u"0|1|2|7|22"_s}};
+        const QJsonObject tabs{{u"Widgets"_s, QJsonArray{QJsonObject{{u"Playlist"_s, playlist}}}}};
+        const QJsonObject panels{{u"Widgets"_s, QJsonArray{QJsonObject{{u"LibraryTree"_s, QJsonObject{}}},
+                                                           QJsonObject{{u"PlaylistTabs"_s, tabs}}}}};
+        gui.layoutProvider()->changeLayout(
+            FyLayout{u"Synthetic favourites"_s,
+                     QJsonObject{{u"Widgets"_s, QJsonArray{QJsonObject{{u"SplitterHorizontal"_s, panels}}}}}});
+    }
+    gui.startup();
+    const auto cleanupGui = qScopeGuard([&]() { gui.shutdown(); });
+    QMainWindow* mainWindow{nullptr};
+    for(QWidget* widget : QApplication::topLevelWidgets()) {
+        if(auto* window = qobject_cast<QMainWindow*>(widget)) {
+            mainWindow = window;
+        }
+    }
+    ASSERT_NE(mainWindow, nullptr);
+    mainWindow->show();
+
+    FakeJellyfinServer server;
+    server.setHandler([](const FakeRequest& request) {
+        if(request.path == "/jf/Items"_L1) {
+            const QJsonArray items = request.query.queryItemValue(u"includeItemTypes"_s) == "Audio"_L1
+                                       ? QJsonArray{item(u"track1"_s), item(u"track2"_s)}
+                                       : QJsonArray{};
+            return FakeJellyfinServer::json(QJsonObject{{u"Items"_s, items}, {u"TotalRecordCount"_s, items.size()}});
+        }
+        if(request.path == "/jf/UserFavoriteItems/track1"_L1) {
+            FakeResponse response = FakeJellyfinServer::json(QJsonObject{{u"IsFavorite"_s, request.method == "POST"}});
+            response.delayMs      = 300;
+            return response;
+        }
+        if(request.path == "/jf/UserFavoriteItems/track2"_L1) {
+            return FakeJellyfinServer::text(500, BodySentinel);
+        }
+        return FakeJellyfinServer::text(404, {});
+    });
+    auto access = std::make_shared<AccessRegistry>();
+    access->setAccess({.serverUrl = server.url(u"/jf"_s),
+                       .serverId  = u"server"_s,
+                       .userId    = u"account"_s,
+                       .userName  = u"Synthetic"_s,
+                       .deviceId  = u"device"_s},
+                      QString::fromLatin1(TokenSentinel));
+    QNetworkAccessManager network;
+    FavouriteSync favourites{&network, application.library(), access, nullptr};
+    connectFavouriteBanner(&favourites, mainWindow);
+    CatalogSync sync{&network, application.library(), access, &favourites, nullptr};
+    QSignalSpy synchronised{&sync, &CatalogSync::finished};
+    sync.start(u"Synthetic source"_s);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return !synchronised.isEmpty(); }, 10000));
+    ASSERT_TRUE(synchronised.front().at(0).toBool());
+    const auto library = application.library()->libraryForPath(libraryUri(access->access()->sourceKey));
+    ASSERT_TRUE(library);
+    favourites.activate(*library);
+    const auto cleanupFavourites = qScopeGuard([&]() { favourites.release(); });
+
+    const auto track = [&](const QString& itemId) {
+        for(const Track& candidate : application.library()->tracks()) {
+            if(itemIdFromPath(candidate.filepath()) == itemId) {
+                return application.library()->trackForId(candidate.id());
+            }
+        }
+        return Track{};
+    };
+    const auto favouriteRequests = [&]() {
+        std::vector<FakeRequest> found;
+        for(const auto& request : server.requests()) {
+            if(request.path.contains("/UserFavoriteItems/"_L1)) {
+                found.push_back(request);
+            }
+        }
+        return found;
+    };
+    const auto trigger = [&](const char* id) {
+        auto* command = gui.actionManager()->command(id);
+        ASSERT_NE(command, nullptr);
+        ASSERT_NE(command->action(), nullptr);
+        command->action()->trigger();
+    };
+    ASSERT_TRUE(track(u"track1"_s).isValid());
+    ASSERT_TRUE(track(u"track2"_s).isValid());
+    if(!screenshot.isEmpty()) {
+        Playlist* playlist
+            = application.playlistHandler()->createPlaylist(u"Favourites"_s, {track(u"track1"_s), track(u"track2"_s)});
+        ASSERT_NE(playlist, nullptr);
+        gui.playlistController()->changeCurrentPlaylist(playlist->id());
+        ASSERT_TRUE(QTest::qWaitFor(
+            [&]() {
+                const auto views = mainWindow->findChildren<QAbstractItemView*>();
+                return std::ranges::any_of(views, [](const QAbstractItemView* view) {
+                    return view->inherits("Fooyin::PlaylistView") && view->model() && view->model()->rowCount() > 0;
+                });
+            },
+            5000));
+    }
+
+    auto selectionView = std::make_unique<QLineEdit>();
+    selectionView->show();
+    selectionView->activateWindow();
+    selectionView->setFocus();
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return selectionView->hasFocus(); }, 5000));
+    auto* context = new WidgetContext(selectionView.get(), Context{Id{"Synthetic.Selection"}}, selectionView.get());
+    gui.trackSelection()->changeSelectedTracks(context, TrackSelection{.tracks = {track(u"track1"_s)}});
+    ASSERT_EQ(gui.trackSelection()->selectedTracks().size(), 1U);
+
+    trigger(Constants::Actions::LoveTracks);
+    EXPECT_TRUE(track(u"track1"_s).isLoved());
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests().size() == 1; }, 5000));
+    trigger(Constants::Actions::UnloveTracks);
+    EXPECT_FALSE(track(u"track1"_s).isLoved());
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests().size() == 2; }, 5000));
+    QTest::qWait(500);
+    EXPECT_FALSE(track(u"track1"_s).isLoved());
+    const auto ordered = favouriteRequests();
+    ASSERT_EQ(ordered.size(), 2U);
+    EXPECT_EQ(ordered.at(0).method, "POST");
+    EXPECT_EQ(ordered.at(1).method, "DELETE");
+    EXPECT_EQ(mainWindow->findChild<MessageBanner*>(), nullptr);
+
+    const LogCapture log;
+    gui.trackSelection()->changeSelectedTracks(context, TrackSelection{.tracks = {track(u"track2"_s)}});
+    trigger(Constants::Actions::ToggleLove);
+    EXPECT_TRUE(track(u"track2"_s).isLoved());
+    MessageBanner* banner{nullptr};
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() {
+            banner = mainWindow->findChild<MessageBanner*>();
+            return banner && banner->isVisible();
+        },
+        5000));
+    EXPECT_FALSE(track(u"track2"_s).isLoved());
+    EXPECT_TRUE(banner->text().startsWith(u"Could not update the Jellyfin favourite"_s))
+        << banner->text().toStdString();
+    EXPECT_TRUE(log.contains(u"Favourite change failed"_s));
+    const QString serverUrl = server.url({}).toString();
+    for(const QString& text : log.messages() << banner->text()) {
+        EXPECT_FALSE(text.contains(QString::fromLatin1(TokenSentinel))) << text.toStdString();
+        EXPECT_FALSE(text.contains(QString::fromLatin1(BodySentinel))) << text.toStdString();
+        EXPECT_FALSE(text.contains(serverUrl)) << text.toStdString();
+        EXPECT_FALSE(text.contains("UserFavoriteItems"_L1)) << text.toStdString();
+    }
+    EXPECT_EQ(favouriteRequests().size(), 3U);
+    if(!screenshot.isEmpty()) {
+        mainWindow->resize(1024, 640);
+        QTest::qWait(500);
+        mainWindow->grab().save(QString::fromLocal8Bit(screenshot));
+    }
 }
 TEST(JellyfinNativeIntegration, ExpandedProxyViewInvalidatesCachedIndexesThroughoutStructuralChanges)
 {

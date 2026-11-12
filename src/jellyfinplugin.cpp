@@ -24,6 +24,8 @@
 #include "jellyfincatalogsync.h"
 #include "jellyfincredentialstatestore.h"
 #include "jellyfincredentialstore.h"
+#include "jellyfinfavouritebanner.h"
+#include "jellyfinfavouritesync.h"
 #include "jellyfininput.h"
 #include "jellyfinpage.h"
 #include "jellyfinplaybackreporter.h"
@@ -35,9 +37,11 @@
 #include <core/playlist/playlisthandler.h>
 #include <core/plugins/coreplugincontext.h>
 #include <gui/plugins/guiplugincontext.h>
+#include <gui/windowcontroller.h>
 #include <utils/fypaths.h>
 
 #include <QDir>
+#include <QMainWindow>
 #include <QNetworkAccessManager>
 
 using namespace Qt::StringLiterals;
@@ -91,14 +95,16 @@ void JellyfinPlugin::initialise(const CorePluginContext& context)
                      &PlaybackReporter::occurrenceEnded);
 }
 
-void JellyfinPlugin::initialise(const GuiPluginContext& /*context*/)
+void JellyfinPlugin::initialise(const GuiPluginContext& context)
 {
     new JellyfinPage(m_account, m_settings, this);
+    connectFavouriteBanner(m_account->favouriteSync(), context.windowController->mainWindow());
 }
 
 void JellyfinPlugin::shutdown()
 {
     m_account->catalogSync()->cancel();
+    m_account->favouriteSync()->release();
     m_playbackReporter->shutdown();
     m_access->clearAccess();
 }

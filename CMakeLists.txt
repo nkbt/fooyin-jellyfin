@@ -31,6 +31,10 @@ add_library(
     src/jellyfincredentialstatestore.h
     src/jellyfincredentialstore.cpp
     src/jellyfincredentialstore.h
+    src/jellyfinfavouritebanner.cpp
+    src/jellyfinfavouritebanner.h
+    src/jellyfinfavouritesync.cpp
+    src/jellyfinfavouritesync.h
     src/jellyfininput.cpp
     src/jellyfininput.h
     src/jellyfinpage.cpp

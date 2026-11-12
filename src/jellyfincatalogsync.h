@@ -39,6 +39,8 @@ namespace Fooyin {
 class MusicLibrary;
 
 namespace Jellyfin {
+class FavouriteSync;
+
 struct MirroredPlaylist
 {
     //! Jellyfin playlist ID.
@@ -55,7 +57,7 @@ class CatalogSync : public QObject
 
 public:
     CatalogSync(QNetworkAccessManager* network, MusicLibrary* library, std::shared_ptr<AccessRegistry> access,
-                QObject* parent);
+                FavouriteSync* favourites, QObject* parent);
 
     //! Starts a new synchronisation for the current account, replacing a running one.
     void start(const QString& libraryName);
@@ -93,8 +95,10 @@ private:
     QNetworkAccessManager* m_network;
     MusicLibrary* m_library;
     std::shared_ptr<AccessRegistry> m_access;
+    FavouriteSync* m_favourites;
 
     quint64 m_run{0};
+    quint64 m_favouriteSequence{0};
     bool m_running{false};
     Access m_runAccess;
     QString m_libraryName;

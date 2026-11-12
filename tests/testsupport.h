@@ -26,12 +26,14 @@
 #include <utils/settings/settingsmanager.h>
 
 #include <QNetworkAccessManager>
+#include <QPointer>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
 
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace Fooyin::Jellyfin::Testing {
 //! Library that stores external snapshots in memory and reports them asynchronously like the host.
@@ -69,6 +71,8 @@ public:
     [[nodiscard]] PendingTrackCoverProvider* pendingTrackCoverProvider() const override;
     void updateTrackStats(const TrackList& tracks, Track::Stats stats) override;
     void updateTrackStats(const Track& track, Track::Stats stats) override;
+    [[nodiscard]] bool canEditTrackStats(const Track& track, Track::Stats stats) const override;
+    void editTrackStats(const TrackList& tracks, Track::Stats stats) override;
     WriteRequest removeUnavailbleTracks() override;
     WriteRequest deleteTracks(const TrackList& tracks) override;
     std::optional<LibraryInfo> addExternalLibrary(const QString& path, const QString& name) override;
@@ -76,8 +80,13 @@ public:
                                       const QUuid& operation) override;
     void setExternalLibraryReadOnlyStats(const LibraryInfo& library, Track::Stats stats) override;
     void setExternalLibraryActive(const LibraryInfo& library, bool active) override;
+    void setExternalLibraryStatsHandler(const LibraryInfo& library, Track::Stats stats, QObject* handler) override;
+    void applyExternalTrackStats(const LibraryInfo& library, const TrackList& tracks, Track::Stats stats,
+                                 const QUuid& operation) override;
     bool isTrackSourceActive(const Track& track) const override;
 
+    //! Removes an external library, its handler, settings and tracks in the host order.
+    void removeExternalLibrary(int libraryId);
     [[nodiscard]] TrackList tracksForLibrary(int libraryId) const;
     [[nodiscard]] std::map<int, LibraryInfo> libraries() const;
 
@@ -85,13 +94,29 @@ public:
     int snapshotRequests{0};
     int snapshotDelayMs{0};
     QUuid lastSnapshotOperation;
+    //! Stores of later applyExternalTrackStats() calls fail after publishing.
+    bool failTrackStats{false};
+    //! Every accepted applyExternalTrackStats() batch in call order.
+    std::vector<TrackList> trackStatsPublications;
 
 private:
+    struct StatsHandler
+    {
+        Track::Stats stats;
+        QPointer<QObject> handler;
+    };
+
+    [[nodiscard]] Track::Stats handledStats(const Track& canonical) const;
+
     std::map<int, LibraryInfo> m_libraries;
     TrackList m_tracks;
     int m_nextTrackId{1};
     std::map<int, Track::Stats> m_sourceStats;
     std::map<QString, bool> m_inactiveSources;
+    std::map<int, StatsHandler> m_statsHandlers;
+    quint64 m_commitSequence{0};
+    //! The commit sequence of the latest published Loved value per track.
+    std::map<int, quint64> m_lovedPublications;
 };
 
 class RemoteIoFixture
