@@ -73,6 +73,7 @@ create_fooyin_plugin(
             src/jellyfinplugin.h
     JSON_IN src/jellyfin.json.in
 )
+qt_add_resources(jellyfin jellyfin_layout PREFIX "/jellyfin" BASE data FILES data/layouts/jellyfin.fyl)
 
 if(BUILD_TESTING)
     enable_testing()

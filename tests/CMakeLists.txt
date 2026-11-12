@@ -44,6 +44,8 @@ if(FOOYIN_SOURCE_DIR)
     set_target_properties(test_jellyfinintegration PROPERTIES AUTORCC ON)
     target_include_directories(test_jellyfinintegration PRIVATE ${FOOYIN_SOURCE_DIR}/src ${FOOYIN_SOURCE_DIR}/src/core ${FOOYIN_SOURCE_DIR}/src/gui)
     target_link_libraries(test_jellyfinintegration PRIVATE jellyfin_test_support PkgConfig::FFMPEG_TEST)
+    target_compile_definitions(test_jellyfinintegration PRIVATE JELLYFIN_PLUGIN_DIR="$<TARGET_FILE_DIR:jellyfin>")
+    add_dependencies(test_jellyfinintegration jellyfin)
     gtest_discover_tests(test_jellyfinintegration DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     # The host settings tree model is not exported, so the test compiles the matching host source.

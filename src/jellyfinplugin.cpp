@@ -31,18 +31,22 @@
 #include "jellyfinplaybackreporter.h"
 #include "jellyfinplaylistmirror.h"
 
+#include <core/coresettings.h>
 #include <core/engine/enginecontroller.h>
 #include <core/network/networkaccessmanager.h>
 #include <core/network/remoteioservice.h>
 #include <core/playlist/playlisthandler.h>
 #include <core/plugins/coreplugincontext.h>
+#include <gui/layout/layoutprovider.h>
 #include <gui/plugins/guiplugincontext.h>
 #include <gui/windowcontroller.h>
 #include <utils/fypaths.h>
+#include <utils/settings/settingsmanager.h>
 
 #include <QDir>
 #include <QMainWindow>
 #include <QNetworkAccessManager>
+#include <QResource>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
@@ -100,6 +104,15 @@ void JellyfinPlugin::initialise(const GuiPluginContext& context)
 {
     new JellyfinPage(m_account, m_settings, this);
     connectFavouriteBanner(m_account->favouriteSync(), context.windowController->mainWindow());
+
+    const FyLayout layout{QResource{u":/jellyfin/layouts/jellyfin.fyl"_s}.uncompressedData()};
+    context.layoutProvider->registerLayout(layout);
+    const FyStateSettings stateSettings;
+    if(m_settings->value<Settings::Core::FirstRun>()
+       && stateSettings.value(u"Interface/ActiveLayout"_s).toString().isEmpty()
+       && !context.layoutProvider->currentLayout().isValid()) {
+        context.layoutProvider->changeLayout(layout);
+    }
 }
 
 void JellyfinPlugin::shutdown()

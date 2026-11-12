@@ -223,6 +223,83 @@ QJsonObject item(const QString& itemId)
 }
 } // namespace
 
+TEST(JellyfinNativeIntegration, PluginSelectsBundledLayoutForNewProfiles)
+{
+    Application application;
+    application.settingsManager()->set<Settings::Core::FirstRun>(true);
+    application.pluginManager()->findPlugins({QString::fromUtf8(JELLYFIN_PLUGIN_DIR)});
+    GuiApplication gui{&application};
+    application.startup();
+    gui.startup();
+    const auto cleanup = qScopeGuard([&]() {
+        gui.shutdown();
+        application.shutdown();
+    });
+
+    const auto layout = gui.layoutProvider()->layoutByName(u"Jellyfin"_s);
+    ASSERT_TRUE(layout.isValid());
+    EXPECT_TRUE(gui.layoutProvider()->isBuiltInLayout(u"Jellyfin"_s));
+    EXPECT_EQ(gui.layoutProvider()->currentLayout().name(), u"Jellyfin"_s);
+    EXPECT_FALSE(layout.appliesWindowSize());
+    EXPECT_FALSE(layout.json().contains(u"WindowSize"_s));
+    const auto widgets = layout.json().value(u"Widgets"_s).toArray().at(0).toObject()
+                             .value(u"SplitterVertical"_s).toObject().value(u"Widgets"_s).toArray();
+    ASSERT_EQ(widgets.size(), 3);
+    const auto browser = widgets.at(1).toObject().value(u"SplitterHorizontal"_s).toObject()
+                             .value(u"Widgets"_s).toArray();
+    ASSERT_EQ(browser.size(), 2);
+    EXPECT_TRUE(browser.at(0).toObject().contains(u"PlaylistManager"_s));
+    const auto playlist = browser.at(1).toObject().value(u"Playlist"_s).toObject();
+    EXPECT_EQ(playlist.value(u"Columns"_s).toString(), u"8:132|3|0:2|1|7:2|22:4"_s);
+    EXPECT_FALSE(playlist.contains(u"ID"_s));
+}
+
+TEST(JellyfinNativeIntegration, PluginPreservesExistingLayoutChoice)
+{
+    Application application;
+    application.settingsManager()->set<Settings::Core::FirstRun>(false);
+    application.pluginManager()->findPlugins({QString::fromUtf8(JELLYFIN_PLUGIN_DIR)});
+    GuiApplication gui{&application};
+    gui.layoutProvider()->changeLayout(
+        FyLayout{u"Synthetic existing layout"_s,
+                 QJsonObject{{u"Widgets"_s, QJsonArray{QJsonObject{{u"Spacer"_s, QJsonObject{}}}}}}});
+    application.startup();
+    gui.startup();
+    const auto cleanup = qScopeGuard([&]() {
+        gui.shutdown();
+        application.shutdown();
+    });
+
+    EXPECT_TRUE(gui.layoutProvider()->layoutByName(u"Jellyfin"_s).isValid());
+    EXPECT_TRUE(gui.layoutProvider()->isBuiltInLayout(u"Jellyfin"_s));
+    EXPECT_EQ(gui.layoutProvider()->currentLayout().name(), u"Synthetic existing layout"_s);
+}
+
+TEST(JellyfinNativeIntegration, PluginPreservesSavedLayoutBeforeFirstRunCompletes)
+{
+    Application application;
+    application.settingsManager()->set<Settings::Core::FirstRun>(true);
+    application.pluginManager()->findPlugins({QString::fromUtf8(JELLYFIN_PLUGIN_DIR)});
+    GuiApplication gui{&application};
+    const FyLayout layout{
+        u"Synthetic saved layout"_s,
+        QJsonObject{{u"Widgets"_s, QJsonArray{QJsonObject{{u"Spacer"_s, QJsonObject{}}}}}}};
+    ASSERT_TRUE(gui.layoutProvider()->saveLayout(layout));
+    {
+        FyStateSettings stateSettings;
+        stateSettings.setValue(u"Interface/ActiveLayout"_s, layout.name());
+    }
+    application.startup();
+    gui.startup();
+    const auto cleanup = qScopeGuard([&]() {
+        gui.shutdown();
+        application.shutdown();
+    });
+
+    EXPECT_TRUE(gui.layoutProvider()->isBuiltInLayout(u"Jellyfin"_s));
+    EXPECT_EQ(gui.layoutProvider()->currentLayout().name(), u"Synthetic saved layout"_s);
+}
+
 TEST(JellyfinNativeIntegration, CatalogAndRealDecoderControllerUseConfirmedOccurrences)
 {
     Application application;

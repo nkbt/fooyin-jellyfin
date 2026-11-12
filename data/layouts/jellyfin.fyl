@@ -1,0 +1,120 @@
+{
+  "Name": "Jellyfin",
+  "Options": {
+    "ApplyTheme": true,
+    "ApplyWindowSize": false,
+    "ThemeOptions": 3
+  },
+  "Theme": "AAAAAQAAAAYAAAAGAAAACABOAG8AcgBkAQAAABkAAAAFAAAAAAH//9jY3t7p6QAAAAAAAQAAAAAB//9/f4mJmZkAAAAAAAUAAAABAf//OztCQlJSAAAAAAAFAAAAAgH//15egYGsrAAAAAAABQAAAAMB//9MTFZWamoAAAAAAAUAAAAEAf//Li40NEBAAAAAAAAFAAAABQH//zQ0OztJSQAAAAAABQAAAAYB///Y2N7e6ekAAAAAAAEAAAAGAf//f3+JiZmZAAAAAAAFAAAABwH/////AAAAAAAAAAAABQAAAAgB///Y2N7e6ekAAAAAAAEAAAAIAf//f3+JiZmZAAAAAAAFAAAACQH//y4uNDRAQAAAAAAABQAAAAoB//87O0JCUlIAAAAAAAUAAAALAf//Hx8kJDAwAAAAAAAFAAAADAH//15egYGsrAAAAAAAAQAAAAwB//9MTFZWamoAAAAAAAUAAAANAf//7Ozv7/T0AAAAAAABAAAADQH//39/iYmZmQAAAAAABQAAAA4B//+IiMDA0NAAAAAAAAUAAAAPAf//tLSOjq2tAAAAAAAFAAAAEAH//0NDTExeXgAAAAAABQAAABIB///s7O/v9PQAAAAAAAUAAAATAf//Li40NEBAAAAAAAAFAAAAFAH//4uLlpapqQAAAAAAAA==",
+  "Toolbars": [],
+  "Version": 1,
+  "Widgets": [
+    {
+      "SplitterVertical": {
+        "Locked": [
+          true,
+          false,
+          true
+        ],
+        "State": "AAAA/wAAAAEAAAADAAAAHAAAAn0AAAAXAP////8BAAAAAgA=",
+        "Widgets": [
+          {
+            "SplitterHorizontal": {
+              "Locked": [
+                true,
+                false,
+                false,
+                false
+              ],
+              "State": "AAAA/wAAAAEAAAAEAAAAggAABqEAAAA+AAAAHAD/////AQAAAAEA",
+              "Widgets": [
+                {
+                  "PlayerControls": {
+                    "ShowNext": true,
+                    "ShowPause": false,
+                    "ShowPlay": false,
+                    "ShowPlayPause": true,
+                    "ShowPrevious": true,
+                    "ShowRandomTrack": false,
+                    "ShowStop": true
+                  }
+                },
+                {
+                  "SeekBar": {
+                    "ShowLabels": true,
+                    "ShowPlayedThreshold": false,
+                    "ShowRemainingTime": false
+                  }
+                },
+                {
+                  "PlaylistControls": {}
+                },
+                {
+                  "VolumeControls": {
+                    "Curve": 4,
+                    "Mode": 3
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "SplitterHorizontal": {
+              "Locked": [
+                true,
+                false
+              ],
+              "State": "AAAA/wAAAAEAAAACAAAC7AAABIcA/////wEAAAABAA==",
+              "Widgets": [
+                {
+                  "PlaylistManager": {
+                    "ActivateOnSelection": false,
+                    "State": "AAAA/wAAAAAAAAABAAAAAP////8BAAAAAAAAAAAAAAAECAAAAAEAAAADAAAAZAAAAtcAAAAEAQEAAAAAAAABAAAAAwAAAGT/////AAAAhAAAAAAAAAAEAAACPwAAAAEAAAABAAAARAAAAAEAAAADAAAAVAAAAAEAAAADAAAAAAAAAAEAAAADAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+                  }
+                },
+                {
+                  "Playlist": {
+                    "AlternatingRows": true,
+                    "ArtworkCornerRadius": 0,
+                    "ArtworkReflection": false,
+                    "ArtworkReflectionGap": 3,
+                    "ArtworkReflectionHeight": 33,
+                    "ArtworkReflectionOpacity": 35,
+                    "BackgroundBlur": 0,
+                    "BackgroundCoverType": 0,
+                    "BackgroundCustomImage": "",
+                    "BackgroundFadeDuration": 0,
+                    "BackgroundImageMode": 0,
+                    "BackgroundMaxSize": 0,
+                    "BackgroundOpacity": 40,
+                    "BackgroundPosition": 4,
+                    "BackgroundScaling": 0,
+                    "BackgroundTrackPreference": 0,
+                    "Columns": "8:132|3|0:2|1|7:2|22:4",
+                    "CustomColumns": false,
+                    "DoubleClickAction": 5,
+                    "HeaderState": "AAAAdXjaY2BgYGNgYBDBgUFyIMAIxExAzAzELEDMCpKzX+SpMgmI7K/feWKyciOz/WKW5Mqsk3fsr9xo2G33XNH+hM2Ot3Ed8+2XiOTs79X9BTKE4f////8BRjgcXQ==",
+                    "ImagePadding": 5,
+                    "ImagePaddingTop": 0,
+                    "MiddleClickAction": 0,
+                    "Preset": 1,
+                    "ShowHeader": true,
+                    "ShowScrollbar": true,
+                    "SingleMode": false,
+                    "StartPlaybackOnSend": false,
+                    "StickyArtwork": false,
+                    "StickyHeaders": false,
+                    "StickySubheaders": false
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "StatusBar": {}
+          }
+        ]
+      }
+    }
+  ]
+}

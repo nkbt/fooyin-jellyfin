@@ -6,6 +6,8 @@ Catalog sync runs on connection and when Refresh library is selected. Failed syn
 
 The plugin requires [external library support (#4)](https://github.com/nkbt/fooyin/pull/4) from the [`external-libraries` branch of nkbt/fooyin](https://github.com/nkbt/fooyin/tree/external-libraries). It does not work with an unmodified fooyin release.
 
+The plugin includes the `Jellyfin` layout and selects it for new profiles. Existing profiles keep their selected layout. For the recommended Jellyfin view, select **Layout → Jellyfin**. This layout includes the playlist manager, album grouping, playback controls and the Nord colour scheme.
+
 ![Jellyfin settings](docs/jellyfin-settings.png)
 
 ## Linux build
