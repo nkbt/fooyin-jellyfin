@@ -31,6 +31,7 @@ target_link_libraries(test_jellyfinplaylistmirror PRIVATE Qt6::Sql)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME JellyfinLauncher.DoesNotContactAnotherProfile COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launchercollisiontest.py ${CMAKE_SOURCE_DIR}/scripts/launch-candidate.sh)
+add_test(NAME JellyfinLauncher.RejectsAMissingOptionValue COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launchermissingvaluetest.py ${CMAKE_SOURCE_DIR}/scripts/launch-candidate.sh)
 
 set(FOOYIN_SOURCE_DIR "" CACHE PATH "Matching host source tree for native integration tests")
 if(FOOYIN_SOURCE_DIR)
@@ -41,6 +42,10 @@ if(FOOYIN_SOURCE_DIR)
     target_include_directories(test_jellyfinintegration PRIVATE ${FOOYIN_SOURCE_DIR}/src ${FOOYIN_SOURCE_DIR}/src/core ${FOOYIN_SOURCE_DIR}/src/gui)
     target_link_libraries(test_jellyfinintegration PRIVATE jellyfin_test_support PkgConfig::FFMPEG_TEST)
     gtest_discover_tests(test_jellyfinintegration DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # The host settings tree model is not exported, so the test compiles the matching host source.
+    jellyfin_add_test(test_jellyfinsettingspage jellyfinsettingspagetest.cpp ${FOOYIN_SOURCE_DIR}/src/utils/settings/settingsmodel.cpp)
+    target_include_directories(test_jellyfinsettingspage PRIVATE ${FOOYIN_SOURCE_DIR}/src)
 endif()
 
 find_program(OPENSSL_EXECUTABLE openssl REQUIRED)

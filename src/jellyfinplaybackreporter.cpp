@@ -35,6 +35,7 @@ using namespace Qt::StringLiterals;
 namespace Fooyin::Jellyfin {
 namespace {
 constexpr qint64 TicksPerMs = 10000;
+const QString StoppedPath   = u"Sessions/Playing/Stopped"_s;
 
 qint64 positionTicks(uint64_t ms)
 {
@@ -107,7 +108,26 @@ void PlaybackReporter::occurrenceEnded(const Engine::PlaybackOccurrenceContext& 
 
 void PlaybackReporter::shutdown()
 {
-    finishOccurrence(false);
+    if(m_shutdown) {
+        return;
+    }
+    m_shutdown = true;
+    // The host ends the occurrence just before shutdown on a normal quit, so its Stopped report can still be queued.
+    std::optional<Report> finalReport;
+    if(m_occurrence && m_occurrence->started) {
+        finalReport = stoppedReport(false);
+    }
+    else if(!m_reports.empty() && m_reports.back().path == StoppedPath) {
+        finalReport = m_reports.back();
+        m_reports.pop_back();
+    }
+    m_occurrence.reset();
+    // The host unloads the plugin straight after shutdown, so the final report cannot wait behind the queue.
+    // The plugin revokes access next, so this reply is not tied to the source lifetime.
+    if(finalReport && m_access->isCurrent(finalReport->access.sourceGeneration)) {
+        auto* reply = post(*finalReport);
+        QObject::connect(reply, &QNetworkReply::finished, this, [this, reply]() { finishReport(reply, StoppedPath); });
+    }
 }
 
 void PlaybackReporter::positionChanged(uint64_t ms)
@@ -193,14 +213,22 @@ void PlaybackReporter::finishOccurrence(bool failed)
         return;
     }
     if(m_occurrence->started) {
-        enqueue(u"Sessions/Playing/Stopped"_s, QJsonObject{
-                                                   {u"ItemId"_s, m_occurrence->itemId},
-                                                   {u"PlaySessionId"_s, m_occurrence->playSessionId},
-                                                   {u"PositionTicks"_s, positionTicks(m_occurrence->positionMs)},
-                                                   {u"Failed"_s, failed},
-                                               });
+        m_reports.push_back(stoppedReport(failed));
+        sendNext();
     }
     m_occurrence.reset();
+}
+
+PlaybackReporter::Report PlaybackReporter::stoppedReport(bool failed) const
+{
+    return Report{.path   = StoppedPath,
+                  .body   = QJsonObject{
+                      {u"ItemId"_s, m_occurrence->itemId},
+                      {u"PlaySessionId"_s, m_occurrence->playSessionId},
+                      {u"PositionTicks"_s, positionTicks(m_occurrence->positionMs)},
+                      {u"Failed"_s, failed},
+                  },
+                  .access = m_occurrence->access};
 }
 
 void PlaybackReporter::enqueue(const QString& path, const QJsonObject& body)
@@ -211,7 +239,7 @@ void PlaybackReporter::enqueue(const QString& path, const QJsonObject& body)
 
 void PlaybackReporter::sendNext()
 {
-    if(m_reply) {
+    if(m_reply || m_shutdown) {
         return;
     }
     while(!m_reports.empty() && !m_access->isCurrent(m_reports.front().access.sourceGeneration)) {
@@ -226,26 +254,37 @@ void PlaybackReporter::sendNext()
     const Report report = m_reports.front();
     m_reports.pop_front();
 
-    QNetworkRequest request
-        = apiRequest(endpointUrl(report.access.serverUrl, report.path, {}), report.access.authorization);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json"_s);
-    auto* reply = m_network->post(request, QJsonDocument{report.body}.toJson(QJsonDocument::Compact));
-    restrictRedirects(reply, report.access.serverUrl);
-    m_reply = reply;
+    auto* reply = post(report);
+    m_reply     = reply;
     m_reportCancellation.emplace(report.access.sourceLifetime, [reply]() {
         QMetaObject::invokeMethod(reply, &QNetworkReply::abort, Qt::QueuedConnection);
     });
 
     QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, path = report.path]() {
         m_reportCancellation.reset();
-        reply->deleteLater();
-        const bool success = reply->error() == QNetworkReply::NoError;
-        if(!success) {
-            qCWarning(JELLYFIN_PLAYBACK) << "Playback report failed:" << path << replyError(reply);
-        }
         m_reply = nullptr;
-        Q_EMIT reportFinished(path, success);
+        finishReport(reply, path);
         sendNext();
     });
+}
+
+QNetworkReply* PlaybackReporter::post(const Report& report)
+{
+    QNetworkRequest request
+        = apiRequest(endpointUrl(report.access.serverUrl, report.path, {}), report.access.authorization);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json"_s);
+    auto* reply = m_network->post(request, QJsonDocument{report.body}.toJson(QJsonDocument::Compact));
+    restrictRedirects(reply, report.access.serverUrl);
+    return reply;
+}
+
+void PlaybackReporter::finishReport(QNetworkReply* reply, const QString& path)
+{
+    reply->deleteLater();
+    const bool success = reply->error() == QNetworkReply::NoError;
+    if(!success) {
+        qCWarning(JELLYFIN_PLAYBACK) << "Playback report failed:" << path << replyError(reply);
+    }
+    Q_EMIT reportFinished(path, success);
 }
 } // namespace Fooyin::Jellyfin

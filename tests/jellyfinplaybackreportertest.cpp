@@ -26,6 +26,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -53,6 +54,22 @@ struct Report
 {
     QString path;
     QJsonObject body;
+};
+
+//! Records each POST when it is issued, before any event-loop pass.
+class RecordingNetworkAccessManager : public QNetworkAccessManager
+{
+public:
+    QStringList postedPaths;
+
+protected:
+    QNetworkReply* createRequest(Operation operation, const QNetworkRequest& request, QIODevice* outgoingData) override
+    {
+        if(operation == PostOperation) {
+            postedPaths.push_back(request.url().path().sliced(4));
+        }
+        return QNetworkAccessManager::createRequest(operation, request, outgoingData);
+    }
 };
 } // namespace
 
@@ -102,7 +119,7 @@ protected:
     std::shared_ptr<int> m_delayMs{std::make_shared<int>(0)};
     FakeJellyfinServer m_server;
     std::shared_ptr<AccessRegistry> m_access;
-    QNetworkAccessManager m_network;
+    RecordingNetworkAccessManager m_network;
     PlaybackReporter m_reporter;
     QSignalSpy m_finished;
 };
@@ -239,6 +256,196 @@ TEST_F(JellyfinPlaybackReporterTest, SourceReplacementCancelsInFlightAndDropsQue
     EXPECT_EQ(reports().size(), 1U);
     EXPECT_FALSE(m_finished.at(1).at(1).toBool());
     EXPECT_FALSE(m_finished.at(2).at(1).toBool());
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownPostsFinalStopWithNoReportInFlight)
+{
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    ASSERT_TRUE(waitForReports(1));
+    *m_delayMs         = 100;
+    context.positionMs = 7000;
+    m_reporter.occurrenceUpdated(context);
+
+    m_reporter.shutdown();
+    m_access->clearAccess();
+    EXPECT_EQ(m_network.postedPaths, (QStringList{u"Sessions/Playing"_s, u"Sessions/Playing/Stopped"_s}));
+
+    ASSERT_TRUE(waitForReports(2));
+    EXPECT_TRUE(m_finished.at(1).at(1).toBool());
+    const auto sent = reports();
+    ASSERT_EQ(sent.size(), 2U);
+    EXPECT_EQ(sent.at(1).path, u"Sessions/Playing/Stopped"_s);
+    EXPECT_EQ(sent.at(1).body.value(u"PositionTicks"_s).toInteger(), 70000000);
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownPostsOnlyTheFinalStopWhileProgressIsInFlight)
+{
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    ASSERT_TRUE(waitForReports(1));
+    *m_delayMs            = 300;
+    context.positionMs    = 30000;
+    context.seekRequestId = 1;
+    m_reporter.occurrenceUpdated(context);
+    ASSERT_TRUE(QTest::qWaitFor([this]() { return m_server.requests().size() == 2; }, 5000));
+    context.positionMs    = 40000;
+    context.seekRequestId = 2;
+    m_reporter.occurrenceUpdated(context);
+    const QStringList posted{u"Sessions/Playing"_s, u"Sessions/Playing/Progress"_s, u"Sessions/Playing/Stopped"_s};
+
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, posted);
+    m_access->clearAccess();
+
+    ASSERT_TRUE(waitForReports(3));
+    QTest::qWait(50);
+    EXPECT_EQ(m_network.postedPaths, posted);
+    ASSERT_EQ(m_finished.size(), 3);
+    EXPECT_EQ(m_finished.at(1).at(0).toString(), u"Sessions/Playing/Progress"_s);
+    EXPECT_FALSE(m_finished.at(1).at(1).toBool());
+    EXPECT_EQ(m_finished.at(2).at(0).toString(), u"Sessions/Playing/Stopped"_s);
+    EXPECT_TRUE(m_finished.at(2).at(1).toBool());
+    const auto sent = reports();
+    ASSERT_EQ(sent.size(), 3U);
+    EXPECT_EQ(sent.at(2).path, u"Sessions/Playing/Stopped"_s);
+    EXPECT_EQ(sent.at(2).body.value(u"PositionTicks"_s).toInteger(), 400000000);
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownPostsTheQueuedStopOfAnOccurrenceEndedByQuit)
+{
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    ASSERT_TRUE(waitForReports(1));
+    *m_delayMs            = 300;
+    context.positionMs    = 30000;
+    context.seekRequestId = 1;
+    m_reporter.occurrenceUpdated(context);
+    ASSERT_TRUE(QTest::qWaitFor([this]() { return m_server.requests().size() == 2; }, 5000));
+    context.positionMs    = 40000;
+    context.seekRequestId = 2;
+    m_reporter.occurrenceUpdated(context);
+    const QStringList posted{u"Sessions/Playing"_s, u"Sessions/Playing/Progress"_s, u"Sessions/Playing/Stopped"_s};
+
+    m_reporter.occurrenceEnded(context);
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, posted);
+    m_access->clearAccess();
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, posted);
+
+    ASSERT_TRUE(waitForReports(3));
+    QTest::qWait(50);
+    EXPECT_EQ(m_network.postedPaths, posted);
+    ASSERT_EQ(m_finished.size(), 3);
+    EXPECT_EQ(m_finished.at(1).at(0).toString(), u"Sessions/Playing/Progress"_s);
+    EXPECT_FALSE(m_finished.at(1).at(1).toBool());
+    EXPECT_EQ(m_finished.at(2).at(0).toString(), u"Sessions/Playing/Stopped"_s);
+    EXPECT_TRUE(m_finished.at(2).at(1).toBool());
+    const auto sent = reports();
+    ASSERT_EQ(sent.size(), 3U);
+    EXPECT_EQ(sent.at(2).path, u"Sessions/Playing/Stopped"_s);
+    EXPECT_EQ(sent.at(2).body.value(u"PositionTicks"_s).toInteger(), 400000000);
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownDoesNotRepeatAStopAlreadyInFlight)
+{
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    ASSERT_TRUE(waitForReports(1));
+    *m_delayMs = 300;
+    m_reporter.occurrenceEnded(context);
+    const QStringList posted{u"Sessions/Playing"_s, u"Sessions/Playing/Stopped"_s};
+    EXPECT_EQ(m_network.postedPaths, posted);
+
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, posted);
+    m_access->clearAccess();
+
+    ASSERT_TRUE(waitForReports(2));
+    QTest::qWait(50);
+    EXPECT_EQ(m_network.postedPaths, posted);
+    EXPECT_EQ(m_finished.size(), 2);
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownAfterSourceReplacementPostsNoQueuedPreviousStop)
+{
+    *m_delayMs = 300;
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    context.positionMs    = 30000;
+    context.seekRequestId = 1;
+    m_reporter.occurrenceUpdated(context);
+    m_reporter.occurrenceEnded(context);
+    ASSERT_TRUE(QTest::qWaitFor([this]() { return !m_server.requests().empty(); }, 5000));
+    m_access->setAccess(connectionFor(m_server.url(u"/jf"_s), u"user2"_s), Token);
+
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, QStringList{u"Sessions/Playing"_s});
+    m_access->clearAccess();
+
+    ASSERT_TRUE(waitForReports(1));
+    QTest::qWait(50);
+    EXPECT_EQ(m_network.postedPaths, QStringList{u"Sessions/Playing"_s});
+    EXPECT_EQ(reports().size(), 1U);
+    EXPECT_EQ(m_finished.size(), 1);
+    EXPECT_FALSE(m_finished.at(0).at(1).toBool());
+}
+
+TEST_F(JellyfinPlaybackReporterTest, PluginShutdownAfterSourceReplacementPostsNoPreviousReports)
+{
+    *m_delayMs = 300;
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    context.positionMs    = 30000;
+    context.seekRequestId = 1;
+    m_reporter.occurrenceUpdated(context);
+    ASSERT_TRUE(QTest::qWaitFor([this]() { return !m_server.requests().empty(); }, 5000));
+    m_access->setAccess(connectionFor(m_server.url(u"/jf"_s), u"user2"_s), Token);
+
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, QStringList{u"Sessions/Playing"_s});
+    m_access->clearAccess();
+
+    ASSERT_TRUE(waitForReports(1));
+    QTest::qWait(50);
+    EXPECT_EQ(m_network.postedPaths, QStringList{u"Sessions/Playing"_s});
+    EXPECT_EQ(reports().size(), 1U);
+    EXPECT_EQ(m_finished.size(), 1);
+    EXPECT_FALSE(m_finished.at(0).at(1).toBool());
+}
+
+TEST_F(JellyfinPlaybackReporterTest, RepeatedPluginShutdownPostsOneFinalStop)
+{
+    Engine::PlaybackOccurrenceContext context{.track                = track(u"track1"_s),
+                                              .playbackOccurrenceId = 1,
+                                              .sourceGeneration     = m_access->access()->sourceGeneration};
+    m_reporter.occurrenceStarted(context);
+    ASSERT_TRUE(waitForReports(1));
+
+    m_reporter.shutdown();
+    m_reporter.shutdown();
+    m_access->clearAccess();
+    m_reporter.shutdown();
+    EXPECT_EQ(m_network.postedPaths, (QStringList{u"Sessions/Playing"_s, u"Sessions/Playing/Stopped"_s}));
+
+    ASSERT_TRUE(waitForReports(2));
+    QTest::qWait(50);
+    EXPECT_EQ(m_finished.size(), 2);
+    EXPECT_TRUE(m_finished.at(1).at(1).toBool());
+    EXPECT_EQ(m_server.requests().size(), 2U);
 }
 
 TEST_F(JellyfinPlaybackReporterTest, LateSourceGenerationCannotBorrowNewTokenOrEndCurrentOccurrence)

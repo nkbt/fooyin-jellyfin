@@ -8,13 +8,25 @@ set -o errexit -o nounset -o pipefail
 host_prefix=""
 profile_dir=""
 
+usage="Usage: $0 --host-prefix DIR --profile-dir DIR [-- FOOYIN_ARGUMENTS...]"
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host-prefix)
+            if [[ $# -lt 2 ]]; then
+                echo "Missing value for $1" >&2
+                echo "$usage" >&2
+                exit 2
+            fi
             host_prefix="$2"
             shift 2
             ;;
         --profile-dir)
+            if [[ $# -lt 2 ]]; then
+                echo "Missing value for $1" >&2
+                echo "$usage" >&2
+                exit 2
+            fi
             profile_dir="$2"
             shift 2
             ;;
@@ -24,14 +36,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 --host-prefix DIR --profile-dir DIR [-- FOOYIN_ARGUMENTS...]" >&2
+            echo "$usage" >&2
             exit 2
             ;;
     esac
 done
 
 if [[ -z "$host_prefix" || -z "$profile_dir" ]]; then
-    echo "Usage: $0 --host-prefix DIR --profile-dir DIR [-- FOOYIN_ARGUMENTS...]" >&2
+    echo "$usage" >&2
     exit 2
 fi
 

@@ -775,6 +775,10 @@ void Account::refresh()
 
 void Account::handleRefreshRequested(const LibraryInfo& library)
 {
+    // The host sends this signal for the external libraries of every provider.
+    if(!library.path.startsWith(QLatin1StringView{Scheme} + "://"_L1)) {
+        return;
+    }
     if(m_connection && library.path == libraryUri(sourceKey(m_connection->serverId, m_connection->userId))) {
         refresh();
         return;

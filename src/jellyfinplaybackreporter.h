@@ -85,6 +85,9 @@ private:
     void reportProgress();
     void enqueue(const QString& path, const QJsonObject& body);
     void sendNext();
+    [[nodiscard]] Report stoppedReport(bool failed) const;
+    [[nodiscard]] QNetworkReply* post(const Report& report);
+    void finishReport(QNetworkReply* reply, const QString& path);
 
     QNetworkAccessManager* m_network;
     std::shared_ptr<AccessRegistry> m_access;
@@ -93,6 +96,7 @@ private:
     QPointer<QNetworkReply> m_reply;
     uint64_t m_hostPlaybackOccurrenceId{0};
     uint64_t m_seekRequestId{0};
+    bool m_shutdown{false};
     std::optional<std::stop_callback<std::function<void()>>> m_reportCancellation;
 };
 } // namespace Fooyin::Jellyfin

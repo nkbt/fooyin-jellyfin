@@ -46,4 +46,20 @@ Open Settings → Integrations → Jellyfin, enter the server address and select
 
 The host PR adds external library snapshots, source-owned playlists and playback lifecycle events. Plugin code remains separate under `src/`.
 
+## Scrobbling
+
+Scrobbling is optional. To submit Now Playing and completed scrobbles for Jellyfin playback, use the standalone scrobbler module from the `master` branch of [nkbt/fooyin-scrobbler](https://github.com/nkbt/fooyin-scrobbler) instead of the bundled scrobbler.
+
+The standalone module keeps the scrobbler plugin identity and settings names, so existing scrobbler services and settings stay in use. Do not load it together with the bundled scrobbler. Add `-DPLUGIN_SELECTION=-scrobbler` to the fooyin configure command above, then build, test and install the module into the same prefix:
+
+```sh
+git clone --branch master --single-branch https://github.com/nkbt/fooyin-scrobbler.git tmp/fooyin-scrobbler
+cmake -S tmp/fooyin-scrobbler -B tmp/scrobbler-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DFooyin_DIR="$PWD/tmp/install/lib/cmake/fooyin" -DCMAKE_PREFIX_PATH="$PWD/tmp/install" -DCMAKE_INSTALL_PREFIX="$PWD/tmp/install"
+cmake --build tmp/scrobbler-build --parallel 2
+ctest --test-dir tmp/scrobbler-build --output-on-failure --parallel 1
+cmake --install tmp/scrobbler-build
+```
+
+Start the isolated profile and enable scrobbling on the General page in Settings → Integrations → Scrobbling. Configure and enable a service on the Services page, apply the settings and play an eligible Jellyfin track. The service shows the track as Now Playing and records a scrobble after the configured listening threshold.
+
 Released under GPL-3.0-or-later. See [COPYING](COPYING).

@@ -784,6 +784,48 @@ TEST_F(JellyfinAccountTest, LibraryRefreshSynchronisesTheSignedInAccount)
     ASSERT_TRUE(QTest::qWaitFor([this]() { return m_library.snapshotRequests == 2; }, 5000));
 }
 
+TEST_F(JellyfinAccountTest, OtherProviderRefreshLeavesTheSignedInAccountUnchanged)
+{
+    auto scenario          = std::make_shared<QuickConnectScenario>();
+    scenario->pendingPolls = 0;
+    m_server.setHandler(quickConnectHandler(scenario));
+
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [this]() { return m_library.snapshotRequests == 1 && !m_account.catalogSync()->isRunning(); }, 5000));
+
+    const QString statusBefore = m_account.status();
+    const auto requestsBefore  = m_server.requests().size();
+    QSignalSpy statusChanges{&m_account, &Account::statusChanged};
+    const auto other = m_library.addExternalLibrary(u"otherprovider://synthetic-library"_s, u"Other provider"_s);
+    ASSERT_TRUE(other.has_value());
+    m_library.refresh(*other);
+    QTest::qWait(50);
+    EXPECT_EQ(statusChanges.count(), 0);
+    EXPECT_EQ(m_account.status(), statusBefore);
+    EXPECT_EQ(m_server.requests().size(), requestsBefore);
+    EXPECT_EQ(m_library.snapshotRequests, 1);
+}
+
+TEST_F(JellyfinAccountTest, OtherProviderRefreshLeavesTheSignedOutAccountUnchanged)
+{
+    const QString statusBefore = m_account.status();
+    QSignalSpy statusChanges{&m_account, &Account::statusChanged};
+    const auto other = m_library.addExternalLibrary(u"otherprovider://synthetic-library"_s, u"Other provider"_s);
+    ASSERT_TRUE(other.has_value());
+    m_library.refresh(*other);
+    QTest::qWait(50);
+    EXPECT_EQ(statusChanges.count(), 0);
+    EXPECT_EQ(m_account.status(), statusBefore);
+    EXPECT_TRUE(m_server.requests().empty());
+
+    const auto jellyfin = m_library.addExternalLibrary(libraryUri(sourceKey(ServerId, UserId)), u"Jellyfin library"_s);
+    ASSERT_TRUE(jellyfin.has_value());
+    m_library.refresh(*jellyfin);
+    EXPECT_EQ(m_account.status(), u"The Jellyfin account for library Jellyfin library is not signed in."_s);
+    EXPECT_TRUE(m_server.requests().empty());
+}
+
 TEST_F(JellyfinAccountTest, SettingsPageShowsTheCodeUntilApproval)
 {
     auto scenario          = std::make_shared<QuickConnectScenario>();

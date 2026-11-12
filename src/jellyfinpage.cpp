@@ -191,7 +191,7 @@ void JellyfinPageWidget::updateState()
 JellyfinPage::JellyfinPage(Account* account, SettingsManager* settings, QObject* parent)
     : SettingsPage{settings->settingsDialog(), parent}
 {
-    setId("Fooyin.Page.Jellyfin");
+    setId("Fooyin.Page.Integrations.Jellyfin");
     setName(tr("Jellyfin"));
     setCategory({tr("Integrations"), tr("Jellyfin")});
     setWidgetCreator([account, settings] { return new JellyfinPageWidget(account, settings); });
