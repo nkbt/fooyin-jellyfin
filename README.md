@@ -99,7 +99,7 @@ Close fooyin on the destination before copying a profile. Back up the destinatio
 | `~/.local/state/fooyin` | `~/Library/Application Support/fooyin` |
 | `~/.cache/fooyin` | `~/Library/Caches/fooyin` |
 
-Keep `fooyin.conf`, `fooyin.state`, the layouts and `fooyin.db` together. Merge the state directory into the macOS data directory. Copy the cache to retain artwork and waveform data. Select `SDL2 (coreaudio)` and the default device for audio output. Start the destination paused when the source player is active.
+Keep `fooyin.conf`, `fooyin.state`, the layouts and `fooyin.db` together. Merge the state directory into the macOS data directory. Copy the cache to retain artwork and waveform data. Enable the SDL2 plugin if the source profile disables it. Select `SDL2 (coreaudio)` and the default device for audio output. Start the destination paused when the source player is active.
 
 The account database contains the current scrobbler credentials. The accepted Jellyfin connection also uses `jellyfin/credential-state.json` in the configuration directory. A connection whose token is absent from `AccountStore` requires an import or a new Quick Connect sign-in. An imported token must match the connection's credential record. Its account value uses the `AccessToken` field.
 
