@@ -46,6 +46,14 @@ FavouriteSync::FavouriteSync(QNetworkAccessManager* network, MusicLibrary* libra
     QObject::connect(m_library, &MusicLibrary::externalTrackStatsChangeRequested, this,
                      &FavouriteSync::handleChangeRequested);
     QObject::connect(m_library, &MusicLibrary::externalTrackStatsFinished, this, &FavouriteSync::handlePublished);
+    m_handlerChangedConnection = QObject::connect(m_library, &MusicLibrary::externalLibraryStatsHandlerChanged, this,
+                                                  &FavouriteSync::handleHandlerChanged);
+}
+
+FavouriteSync::~FavouriteSync()
+{
+    // The library reports the removed handler while QObject destroys this object.
+    QObject::disconnect(m_handlerChangedConnection);
 }
 
 void FavouriteSync::activate(const LibraryInfo& library)
@@ -63,36 +71,25 @@ void FavouriteSync::activate(const LibraryInfo& library)
 
 void FavouriteSync::release()
 {
-    if(!m_sourceLibrary) {
+    if(!m_sourceAccess) {
         return;
     }
 
-    std::map<QString, Edit> edits;
-    edits.swap(m_edits);
-    m_operations.clear();
-    ++m_sequence;
-
-    TrackList restored;
-    for(auto& [itemId, edit] : edits) {
-        if(QNetworkReply* reply = edit.reply) {
-            edit.reply = nullptr;
-            edit.cancellation.reset();
-            reply->abort();
-        }
-        if(edit.desired != edit.confirmed) {
-            Track track{m_library->trackForId(edit.trackId)};
-            if(track.isValid()) {
-                track.setLoved(edit.confirmed);
-                restored.push_back(track);
+    const std::map<QString, Edit> edits = takeEdits();
+    if(m_sourceLibrary) {
+        TrackList restored;
+        for(const auto& [itemId, edit] : edits) {
+            if(edit.desired != edit.confirmed) {
+                Track track{m_library->trackForId(edit.trackId)};
+                if(track.isValid()) {
+                    track.setLoved(edit.confirmed);
+                    restored.push_back(track);
+                }
             }
         }
+        publish(restored);
+        m_library->setExternalLibraryStatsHandler(*m_sourceLibrary, Track::Stat::None, nullptr);
     }
-
-    if(!restored.empty()) {
-        // Nothing reports the result of this rollback because the account is gone.
-        m_library->applyExternalTrackStats(*m_sourceLibrary, restored, Track::Stat::Loved, QUuid::createUuid());
-    }
-    m_library->setExternalLibraryStatsHandler(*m_sourceLibrary, Track::Stat::None, nullptr);
     m_sourceLibrary.reset();
     m_sourceAccess.reset();
 }
@@ -102,14 +99,25 @@ quint64 FavouriteSync::sequence() const
     return m_sequence;
 }
 
-void FavouriteSync::reconcileSnapshot(const Access& access, TrackList& tracks, quint64 snapshotSequence)
+void FavouriteSync::reconcileSnapshot(const Access& access, const LibraryInfo& library, TrackList& tracks,
+                                      quint64 snapshotSequence)
 {
-    if(!m_sourceAccess || access.sourceGeneration != m_sourceAccess->sourceGeneration) {
+    if(!m_sourceAccess || access.sourceGeneration != m_sourceAccess->sourceGeneration
+       || library.path != libraryUri(m_sourceAccess->sourceKey)) {
         return;
     }
 
+    if(!m_sourceLibrary) {
+        // Refresh recreated the removed source library.
+        m_sourceLibrary = library;
+        m_library->setExternalLibraryStatsHandler(library, Track::Stat::Loved, this);
+    }
+
+    m_catalogFavourites.clear();
     for(Track& track : tracks) {
-        const auto it = m_edits.find(itemIdFromPath(track.filepath()));
+        const QString itemId = itemIdFromPath(track.filepath());
+        m_catalogFavourites.insert_or_assign(itemId, track.isLoved());
+        const auto it = m_edits.find(itemId);
         if(it == m_edits.end()) {
             continue;
         }
@@ -121,6 +129,36 @@ void FavouriteSync::reconcileSnapshot(const Access& access, TrackList& tracks, q
             m_edits.erase(it);
         }
     }
+}
+
+void FavouriteSync::handleHandlerChanged()
+{
+    if(!m_sourceLibrary) {
+        return;
+    }
+    const auto library = m_library->libraryInfo(m_sourceLibrary->id);
+    if(library && library->path == m_sourceLibrary->path) {
+        return;
+    }
+    // The removed library took its tracks, so pending edits have nothing to restore.
+    takeEdits();
+    m_sourceLibrary.reset();
+}
+
+std::map<QString, FavouriteSync::Edit> FavouriteSync::takeEdits()
+{
+    std::map<QString, Edit> edits;
+    edits.swap(m_edits);
+    m_catalogFavourites.clear();
+    ++m_sequence;
+    for(auto& [itemId, edit] : edits) {
+        if(QNetworkReply* reply = edit.reply) {
+            edit.reply = nullptr;
+            edit.cancellation.reset();
+            reply->abort();
+        }
+    }
+    return edits;
 }
 
 void FavouriteSync::handleChangeRequested(const LibraryInfo& library, const TrackList& tracks, Track::Stats stats)
@@ -137,21 +175,26 @@ void FavouriteSync::handleChangeRequested(const LibraryInfo& library, const Trac
             continue;
         }
 
+        const bool shown    = m_library->trackForId(track.id()).isLoved();
         auto [it, inserted] = m_edits.try_emplace(itemId);
         Edit& edit          = it->second;
         if(inserted) {
-            const bool loved = m_library->trackForId(track.id()).isLoved();
-            edit.trackId     = track.id();
-            edit.confirmed   = loved;
-            edit.desired     = loved;
+            // The library shows an older value until a submitted catalog is stored.
+            const auto catalog = m_catalogFavourites.find(itemId);
+            edit.confirmed     = catalog != m_catalogFavourites.end() ? catalog->second : shown;
+            edit.desired       = edit.confirmed;
         }
-        if(track.isLoved() == edit.desired) {
+        edit.trackId = track.id();
+        if(track.isLoved() == edit.desired && shown == edit.desired) {
             continue;
         }
 
-        edit.desired  = track.isLoved();
         edit.sequence = ++m_sequence;
         published.push_back(track);
+        if(track.isLoved() == edit.desired) {
+            continue;
+        }
+        edit.desired = track.isLoved();
         if(!edit.reply) {
             send(itemId, edit);
         }

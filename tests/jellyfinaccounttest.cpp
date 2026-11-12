@@ -23,12 +23,14 @@
 #include "jellyfinaccess.h"
 #include "jellyfincatalogsync.h"
 #include "jellyfincredentialstatestore.h"
+#include "jellyfinfavouritebanner.h"
 #include "jellyfinfavouritesync.h"
 #include "jellyfininput.h"
 #include "jellyfinpage.h"
 #include "jellyfintrack.h"
 #include "testsupport.h"
 
+#include <gui/widgets/messagebanner.h>
 #include <utils/settings/settingsmanager.h>
 
 #include <QElapsedTimer>
@@ -44,6 +46,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QWidget>
 
 #include <gtest/gtest.h>
 
@@ -1770,6 +1773,101 @@ TEST_F(JellyfinAccountTest, SignOutRestoresAPendingFavouriteAndStopsEditing)
     EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
     EXPECT_EQ(favouriteRequests(m_server).size(), 1U);
     EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinAccountTest, SignOutReportsAFailedFavouriteRollbackInTheBanner)
+{
+    auto scenario              = std::make_shared<QuickConnectScenario>();
+    scenario->pendingPolls     = 0;
+    scenario->favouriteDelayMs = 800;
+    m_server.setHandler(quickConnectHandler(scenario));
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_library.tracks().size() == 1 && !m_account.catalogSync()->isRunning(); }, 5000));
+    const Track track = m_library.tracks().front();
+    QWidget window;
+    window.show();
+    connectFavouriteBanner(m_account.favouriteSync(), &window);
+    QSignalSpy failed{m_account.favouriteSync(), &FavouriteSync::failed};
+    const LogCapture log;
+
+    editLoved(m_library, track, true);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 1; }, 5000));
+    m_library.failTrackStats = true;
+    m_account.signOut();
+    ASSERT_FALSE(m_account.connection());
+    EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
+
+    MessageBanner* banner{nullptr};
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() {
+            banner = window.findChild<MessageBanner*>();
+            return banner && banner->isVisible();
+        },
+        5000));
+    EXPECT_EQ(banner->text(), u"The player could not save the Jellyfin favourite change."_s);
+    EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
+    EXPECT_TRUE(log.contains(u"The player could not store a favourite change"_s));
+    const QString logged = log.messages().join(u'\n');
+    EXPECT_FALSE(logged.contains(m_server.url({}).authority()));
+    EXPECT_FALSE(logged.contains("UserFavoriteItems"_L1));
+
+    QTest::qWait(1000);
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
+}
+
+TEST_F(JellyfinAccountTest, AccountSwitchReportsAFailedFavouriteRollbackInTheBanner)
+{
+    auto first              = std::make_shared<QuickConnectScenario>();
+    first->pendingPolls     = 0;
+    first->favouriteDelayMs = 800;
+    m_server.setHandler(quickConnectHandler(first));
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_library.tracks().size() == 1 && !m_account.catalogSync()->isRunning(); }, 5000));
+    const Track firstTrack = m_library.tracks().front();
+    QWidget window;
+    window.show();
+    connectFavouriteBanner(m_account.favouriteSync(), &window);
+    QSignalSpy failed{m_account.favouriteSync(), &FavouriteSync::failed};
+    const LogCapture log;
+
+    editLoved(m_library, firstTrack, true);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 1; }, 5000));
+
+    auto second          = std::make_shared<QuickConnectScenario>();
+    second->pendingPolls = 0;
+    second->exchangeResult.insert(u"User"_s, QJsonObject{{u"Id"_s, u"user2"_s}, {u"Name"_s, u"Second User"_s}});
+    second->exchangeResult.insert(u"AccessToken"_s, u"synthetic-second-token"_s);
+    m_server.setHandler(quickConnectHandler(second));
+    m_library.failTrackStats = true;
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_account.connection() && m_account.connection()->userId == u"user2"_s; }, 5000));
+    m_library.failTrackStats = false;
+    EXPECT_FALSE(m_library.trackForId(firstTrack.id()).isLoved());
+
+    MessageBanner* banner{nullptr};
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() {
+            banner = window.findChild<MessageBanner*>();
+            return banner && banner->isVisible();
+        },
+        5000));
+    EXPECT_EQ(banner->text(), u"The player could not save the Jellyfin favourite change."_s);
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_library.tracks().size() == 2 && !m_account.catalogSync()->isRunning(); }, 5000));
+    EXPECT_FALSE(m_library.trackForId(firstTrack.id()).isLoved());
+    EXPECT_TRUE(log.contains(u"The player could not store a favourite change"_s));
+    const QString logged = log.messages().join(u'\n');
+    EXPECT_FALSE(logged.contains("synthetic-second-token"_L1));
+    EXPECT_FALSE(logged.contains(m_server.url({}).authority()));
+    EXPECT_FALSE(logged.contains("UserFavoriteItems"_L1));
+
+    QTest::qWait(1000);
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_FALSE(m_library.trackForId(firstTrack.id()).isLoved());
 }
 
 TEST_F(JellyfinAccountTest, DestructionRestoresAPendingFavouriteAndClearsTheHandler)

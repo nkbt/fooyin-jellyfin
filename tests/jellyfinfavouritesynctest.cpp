@@ -236,6 +236,21 @@ protected:
         return QTest::qWaitFor([&]() { return favouriteRequests().size() >= count; }, 5000);
     }
 
+    void expectInvalidResponseRestores(FavouriteReply reply)
+    {
+        const LogCapture log;
+        QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+        m_server->reply = reply;
+
+        edit(u"track0"_s, false);
+        EXPECT_FALSE(loved(u"track0"_s));
+        ASSERT_TRUE(failed.wait(5000));
+        EXPECT_TRUE(loved(u"track0"_s));
+        EXPECT_TRUE(failed.first().at(0).toString().contains("invalid favourite response"_L1));
+        EXPECT_TRUE(log.contains(u"Favourite change failed"_s));
+        EXPECT_FALSE(log.contains(QString::fromLatin1(BodySentinel)));
+    }
+
     //! Waits until every request reached the client and was handled.
     void settle()
     {
@@ -301,23 +316,19 @@ TEST_F(JellyfinFavouriteSyncTest, ReturnedFavouriteValueIsConfirmed)
     EXPECT_EQ(favouriteRequests().back().method, "POST");
 }
 
-TEST_F(JellyfinFavouriteSyncTest, MalformedResponsesRestoreTheConfirmedValue)
+TEST_F(JellyfinFavouriteSyncTest, NonJsonResponseRestoresTheConfirmedValue)
 {
-    const std::vector<FavouriteReply> replies{FavouriteReply::NotJson, FavouriteReply::MissingField,
-                                              FavouriteReply::WrongType};
-    for(const FavouriteReply reply : replies) {
-        const LogCapture log;
-        QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
-        m_server->reply = reply;
+    expectInvalidResponseRestores(FavouriteReply::NotJson);
+}
 
-        edit(u"track0"_s, false);
-        EXPECT_FALSE(loved(u"track0"_s));
-        ASSERT_TRUE(failed.wait(5000));
-        EXPECT_TRUE(loved(u"track0"_s));
-        EXPECT_TRUE(failed.first().at(0).toString().contains("invalid favourite response"_L1));
-        EXPECT_TRUE(log.contains(u"Favourite change failed"_s));
-        EXPECT_FALSE(log.contains(QString::fromLatin1(BodySentinel)));
-    }
+TEST_F(JellyfinFavouriteSyncTest, WrappedFavouriteResponseRestoresTheConfirmedValue)
+{
+    expectInvalidResponseRestores(FavouriteReply::MissingField);
+}
+
+TEST_F(JellyfinFavouriteSyncTest, NonBooleanFavouriteResponseRestoresTheConfirmedValue)
+{
+    expectInvalidResponseRestores(FavouriteReply::WrongType);
 }
 
 TEST_F(JellyfinFavouriteSyncTest, HttpFailureRestoresAndReportsWithoutSensitiveDetails)
@@ -333,12 +344,15 @@ TEST_F(JellyfinFavouriteSyncTest, HttpFailureRestoresAndReportsWithoutSensitiveD
 
     const QString message = failed.first().at(0).toString();
     EXPECT_TRUE(message.contains("HTTP status 500"_L1));
-    for(const QString& text : {message, log.messages().join(u'\n')}) {
-        EXPECT_FALSE(text.contains(QString::fromLatin1(BodySentinel)));
-        EXPECT_FALSE(text.contains(Token));
-        EXPECT_FALSE(text.contains(m_fake.url({}).authority()));
-        EXPECT_FALSE(text.contains("UserFavoriteItems"_L1));
-    }
+    const QString logged = log.messages().join(u'\n');
+    EXPECT_FALSE(message.contains(QString::fromLatin1(BodySentinel)));
+    EXPECT_FALSE(message.contains(Token));
+    EXPECT_FALSE(message.contains(m_fake.url({}).authority()));
+    EXPECT_FALSE(message.contains("UserFavoriteItems"_L1));
+    EXPECT_FALSE(logged.contains(QString::fromLatin1(BodySentinel)));
+    EXPECT_FALSE(logged.contains(Token));
+    EXPECT_FALSE(logged.contains(m_fake.url({}).authority()));
+    EXPECT_FALSE(logged.contains("UserFavoriteItems"_L1));
 
     m_server->status = 401;
     edit(u"track1"_s, true);
@@ -552,6 +566,142 @@ TEST_F(JellyfinFavouriteSyncTest, CatalogFetchedBeforeAnEditCannotOverwriteIt)
     ASSERT_TRUE(finished.wait(10000));
     ASSERT_TRUE(finished.first().at(0).toBool());
     EXPECT_TRUE(loved(u"track1"_s));
+}
+
+TEST_F(JellyfinFavouriteSyncTest, SubmittedCatalogIsTheRollbackValueBeforeItIsStored)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy finished{&m_sync, &CatalogSync::finished};
+    m_server->setFavourite(u"track0"_s, false);
+    m_server->failNextRequests = 1;
+    m_library.snapshotDelayMs  = 1500;
+    const int snapshots        = m_library.snapshotRequests;
+
+    m_sync.start(u"Jellyfin: Synthetic User"_s);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return m_library.snapshotRequests > snapshots; }, 5000));
+    ASSERT_TRUE(loved(u"track0"_s));
+    edit(u"track0"_s, true);
+    ASSERT_TRUE(failed.wait(5000));
+    EXPECT_TRUE(finished.isEmpty());
+    EXPECT_FALSE(loved(u"track0"_s));
+    EXPECT_EQ(favouriteRequests().front().method, "POST");
+
+    ASSERT_TRUE(finished.wait(10000));
+    ASSERT_TRUE(finished.first().at(0).toBool());
+    EXPECT_FALSE(loved(u"track0"_s));
+    EXPECT_EQ(favouriteRequests().size(), 1U);
+}
+
+TEST_F(JellyfinFavouriteSyncTest, ChoiceMatchingASubmittedCatalogShowsAtOnceWithoutARequest)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy finished{&m_sync, &CatalogSync::finished};
+    m_server->setFavourite(u"track0"_s, false);
+    m_server->failNextRequests = 1;
+    m_library.snapshotDelayMs  = 1500;
+    const int snapshots        = m_library.snapshotRequests;
+
+    m_sync.start(u"Jellyfin: Synthetic User"_s);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return m_library.snapshotRequests > snapshots; }, 5000));
+    ASSERT_TRUE(loved(u"track0"_s));
+    edit(u"track0"_s, false);
+    EXPECT_FALSE(loved(u"track0"_s));
+    settle();
+    EXPECT_TRUE(finished.isEmpty());
+    EXPECT_FALSE(loved(u"track0"_s));
+
+    ASSERT_TRUE(finished.wait(10000));
+    ASSERT_TRUE(finished.first().at(0).toBool());
+    EXPECT_FALSE(loved(u"track0"_s));
+    EXPECT_TRUE(favouriteRequests().empty());
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinFavouriteSyncTest, RepeatedRefreshKeepsOneHandlerRegistration)
+{
+    QSignalSpy handlerChanged{&m_library, &MusicLibrary::externalLibraryStatsHandlerChanged};
+
+    ASSERT_TRUE(runSync());
+    ASSERT_TRUE(runSync());
+    EXPECT_TRUE(handlerChanged.isEmpty());
+    EXPECT_TRUE(m_library.canEditTrackStats(track(u"track1"_s), Track::Stat::Loved));
+}
+
+TEST_F(JellyfinFavouriteSyncTest, RefreshRestoresEditingOfARecreatedLibrary)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy handlerChanged{&m_library, &MusicLibrary::externalLibraryStatsHandlerChanged};
+    m_library.removeExternalLibrary(m_libraryInfo.id);
+    ASSERT_FALSE(track(u"track1"_s).isValid());
+    EXPECT_EQ(handlerChanged.size(), 1);
+
+    ASSERT_TRUE(runSync());
+    const Track recreated = track(u"track1"_s);
+    ASSERT_TRUE(recreated.isValid());
+    EXPECT_EQ(recreated.libraryId(), m_libraryInfo.id);
+    EXPECT_EQ(handlerChanged.size(), 2);
+    EXPECT_TRUE(m_library.canEditTrackStats(recreated, Track::Stat::Loved));
+
+    edit(u"track1"_s, true);
+    EXPECT_TRUE(loved(u"track1"_s));
+    ASSERT_TRUE(waitForRequests(1));
+    settle();
+    const FakeRequest request = favouriteRequests().front();
+    EXPECT_EQ(request.method, "POST");
+    EXPECT_EQ(request.query.query(), u"userId=user1"_s);
+    EXPECT_TRUE(request.header("authorization").contains(TokenField));
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinFavouriteSyncTest, RemovalDuringADelayedEditIgnoresItsReplyAfterRecreation)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    m_server->storeFavourites = false;
+    m_server->delayMs         = 800;
+
+    edit(u"track1"_s, true);
+    ASSERT_TRUE(waitForRequests(1));
+    const size_t publications = m_library.trackStatsPublications.size();
+    m_library.removeExternalLibrary(m_libraryInfo.id);
+    EXPECT_EQ(m_library.trackStatsPublications.size(), publications);
+
+    m_server->delayMs = 0;
+    ASSERT_TRUE(runSync());
+    EXPECT_FALSE(loved(u"track1"_s));
+    QTest::qWait(1100);
+    EXPECT_FALSE(loved(u"track1"_s));
+    EXPECT_EQ(m_library.trackStatsPublications.size(), publications);
+    EXPECT_EQ(favouriteRequests().size(), 1U);
+    EXPECT_TRUE(failed.isEmpty());
+
+    m_server->storeFavourites = true;
+    edit(u"track1"_s, true);
+    EXPECT_TRUE(loved(u"track1"_s));
+    ASSERT_TRUE(waitForRequests(2));
+    settle();
+    EXPECT_EQ(favouriteRequests().back().method, "POST");
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinFavouriteSyncTest, RemovalWithoutRecreationStopsEditing)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    m_server->delayMs   = 600;
+    const Track removed = track(u"track1"_s);
+
+    edit(u"track1"_s, true);
+    ASSERT_TRUE(waitForRequests(1));
+    m_library.removeExternalLibrary(m_libraryInfo.id);
+    settle();
+    EXPECT_FALSE(m_library.trackForId(removed.id()).isValid());
+    EXPECT_TRUE(failed.isEmpty());
+
+    m_favourites.release();
+    QTest::qWait(100);
+    EXPECT_TRUE(failed.isEmpty());
+    EXPECT_EQ(favouriteRequests().size(), 1U);
 }
 
 TEST_F(JellyfinFavouriteSyncTest, CatalogRefreshAdoptsServerChangesAfterSettledEdits)

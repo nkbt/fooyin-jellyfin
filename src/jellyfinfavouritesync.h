@@ -50,16 +50,18 @@ class FavouriteSync : public QObject
 public:
     FavouriteSync(QNetworkAccessManager* network, MusicLibrary* library, std::shared_ptr<AccessRegistry> access,
                   QObject* parent);
+    ~FavouriteSync() override;
 
     //! Accepts Loved edits of @p library with the current access.
     void activate(const LibraryInfo& library);
-    //! Cancels pending edits, restores their confirmed values and stops accepting edits.
+    //! Cancels pending edits, restores their confirmed values, reports a failed restore and stops accepting edits.
     void release();
 
     //! Increases with every edit and server result.
     [[nodiscard]] quint64 sequence() const;
-    //! Keeps newer or pending edits in a catalog fetched from @p snapshotSequence and accepts older ones as confirmed.
-    void reconcileSnapshot(const Access& access, TrackList& tracks, quint64 snapshotSequence);
+    //! Accepts a recreated @p library and keeps pending edits or edits newer than @p snapshotSequence in @p tracks.
+    void reconcileSnapshot(const Access& access, const LibraryInfo& library, TrackList& tracks,
+                           quint64 snapshotSequence);
 
 Q_SIGNALS:
     //! A user-facing message without URLs, headers or response bodies.
@@ -78,6 +80,9 @@ private:
         std::optional<std::stop_callback<std::function<void()>>> cancellation;
     };
 
+    void handleHandlerChanged();
+    //! Cancels and returns pending edits.
+    std::map<QString, Edit> takeEdits();
     void handleChangeRequested(const LibraryInfo& library, const TrackList& tracks, Track::Stats stats);
     void send(const QString& itemId, Edit& edit);
     void handleReply(QNetworkReply* reply, const QString& itemId);
@@ -88,10 +93,14 @@ private:
     QNetworkAccessManager* m_network;
     MusicLibrary* m_library;
     std::shared_ptr<AccessRegistry> m_access;
+    //! Empty after the source library was removed, until Refresh recreates it.
     std::optional<LibraryInfo> m_sourceLibrary;
     std::optional<Access> m_sourceAccess;
     std::map<QString, Edit> m_edits;
+    //! The favourite of every item in the latest catalog, by item ID.
+    std::map<QString, bool> m_catalogFavourites;
     std::set<QUuid> m_operations;
+    QMetaObject::Connection m_handlerChangedConnection;
     quint64 m_sequence{0};
 };
 } // namespace Jellyfin

@@ -229,9 +229,43 @@ std::optional<LibraryInfo> StubMusicLibrary::addExternalLibrary(const QString& p
     LibraryInfo library;
     library.name = name;
     library.path = path;
-    library.id   = static_cast<int>(m_libraries.size()) + 1;
+    // Like an SQLite row ID, a removed highest ID is reused.
+    library.id = m_libraries.empty() ? 1 : m_libraries.rbegin()->first + 1;
     m_libraries.emplace(library.id, library);
     return library;
+}
+
+void StubMusicLibrary::removeExternalLibrary(int libraryId)
+{
+    const auto library = m_libraries.find(libraryId);
+    if(library == m_libraries.end()) {
+        return;
+    }
+    const QString path = library->second.path;
+    m_libraries.erase(library);
+
+    if(m_statsHandlers.erase(libraryId) > 0) {
+        Q_EMIT externalLibraryStatsHandlerChanged();
+    }
+    m_sourceStats.erase(libraryId);
+    const bool wasInactive = m_inactiveSources.contains(path) && m_inactiveSources.at(path);
+    m_inactiveSources.erase(path);
+    if(wasInactive) {
+        Q_EMIT sourceActivationChanged();
+    }
+
+    TrackList kept;
+    TrackList removed;
+    for(const Track& track : m_tracks) {
+        if(track.libraryId() == libraryId) {
+            removed.push_back(track);
+        }
+        else {
+            kept.push_back(track);
+        }
+    }
+    m_tracks = kept;
+    Q_EMIT tracksDeleted(removed);
 }
 
 void StubMusicLibrary::setExternalLibraryReadOnlyStats(const LibraryInfo& library, Track::Stats stats)

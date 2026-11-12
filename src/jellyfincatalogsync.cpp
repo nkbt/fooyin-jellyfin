@@ -363,7 +363,7 @@ void CatalogSync::applySnapshot()
         }
     }
 
-    m_favourites->reconcileSnapshot(m_runAccess, tracks, m_favouriteSequence);
+    m_favourites->reconcileSnapshot(m_runAccess, *library, tracks, m_favouriteSequence);
     m_library->setExternalLibraryReadOnlyStats(*library, Track::Stat::Loved);
     m_libraryId        = library->id;
     m_awaitingSnapshot = true;

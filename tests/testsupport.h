@@ -85,6 +85,8 @@ public:
                                  const QUuid& operation) override;
     bool isTrackSourceActive(const Track& track) const override;
 
+    //! Removes an external library, its handler, settings and tracks in the host order.
+    void removeExternalLibrary(int libraryId);
     [[nodiscard]] TrackList tracksForLibrary(int libraryId) const;
     [[nodiscard]] std::map<int, LibraryInfo> libraries() const;
 

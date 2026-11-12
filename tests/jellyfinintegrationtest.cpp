@@ -643,6 +643,16 @@ TEST(JellyfinNativeIntegration, LoveActionsEditJellyfinFavouritesAndReportFailur
     application.pluginManager()->findPlugins(
         {QFileInfo(QString::fromUtf8(JELLYFIN_HOST_CORE_LIBRARY)).dir().filePath(u"plugins"_s)});
     GuiApplication gui{&application};
+    const QByteArray screenshot = qgetenv("JELLYFIN_FAVOURITE_SCREENSHOT");
+    if(!screenshot.isEmpty()) {
+        const QJsonObject playlist{{u"SingleMode"_s, false}, {u"Columns"_s, u"0|1|2|7|22"_s}};
+        const QJsonObject tabs{{u"Widgets"_s, QJsonArray{QJsonObject{{u"Playlist"_s, playlist}}}}};
+        const QJsonObject panels{{u"Widgets"_s, QJsonArray{QJsonObject{{u"LibraryTree"_s, QJsonObject{}}},
+                                                           QJsonObject{{u"PlaylistTabs"_s, tabs}}}}};
+        gui.layoutProvider()->changeLayout(
+            FyLayout{u"Synthetic favourites"_s,
+                     QJsonObject{{u"Widgets"_s, QJsonArray{QJsonObject{{u"SplitterHorizontal"_s, panels}}}}}});
+    }
     gui.startup();
     const auto cleanupGui = qScopeGuard([&]() { gui.shutdown(); });
     QMainWindow* mainWindow{nullptr};
@@ -717,6 +727,20 @@ TEST(JellyfinNativeIntegration, LoveActionsEditJellyfinFavouritesAndReportFailur
     };
     ASSERT_TRUE(track(u"track1"_s).isValid());
     ASSERT_TRUE(track(u"track2"_s).isValid());
+    if(!screenshot.isEmpty()) {
+        Playlist* playlist
+            = application.playlistHandler()->createPlaylist(u"Favourites"_s, {track(u"track1"_s), track(u"track2"_s)});
+        ASSERT_NE(playlist, nullptr);
+        gui.playlistController()->changeCurrentPlaylist(playlist->id());
+        ASSERT_TRUE(QTest::qWaitFor(
+            [&]() {
+                const auto views = mainWindow->findChildren<QAbstractItemView*>();
+                return std::ranges::any_of(views, [](const QAbstractItemView* view) {
+                    return view->inherits("Fooyin::PlaylistView") && view->model() && view->model()->rowCount() > 0;
+                });
+            },
+            5000));
+    }
 
     auto selectionView = std::make_unique<QLineEdit>();
     selectionView->show();
@@ -764,9 +788,9 @@ TEST(JellyfinNativeIntegration, LoveActionsEditJellyfinFavouritesAndReportFailur
         EXPECT_FALSE(text.contains("UserFavoriteItems"_L1)) << text.toStdString();
     }
     EXPECT_EQ(favouriteRequests().size(), 3U);
-    if(const QByteArray screenshot = qgetenv("JELLYFIN_FAVOURITE_SCREENSHOT"); !screenshot.isEmpty()) {
+    if(!screenshot.isEmpty()) {
         mainWindow->resize(1024, 640);
-        QTest::qWait(100);
+        QTest::qWait(500);
         mainWindow->grab().save(QString::fromLocal8Bit(screenshot));
     }
 }
