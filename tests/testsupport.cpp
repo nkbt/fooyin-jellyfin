@@ -177,6 +177,35 @@ void StubMusicLibrary::updateTrackStats(const TrackList& /*tracks*/, Track::Stat
 
 void StubMusicLibrary::updateTrackStats(const Track& /*track*/, Track::Stats /*stats*/) { }
 
+bool StubMusicLibrary::canEditTrackStats(const Track& track, Track::Stats stats) const
+{
+    const Track canonical = trackForId(track.id());
+    if(!canonical.isValid()) {
+        return canUpdateTrackStats(track, stats);
+    }
+    return ((stats & canonical.readOnlyStats()) & ~handledStats(canonical)) == Track::Stat::None;
+}
+
+void StubMusicLibrary::editTrackStats(const TrackList& tracks, Track::Stats stats)
+{
+    updateTrackStats(tracks, stats);
+
+    std::map<int, TrackList> requestedTracks;
+    for(const Track& track : tracks) {
+        const Track canonical             = trackForId(track.id());
+        const Track::Stats requestedStats = stats & handledStats(canonical);
+        if(requestedStats != Track::Stat::None) {
+            Track requestedTrack{canonical};
+            requestedTrack.replaceStats(track, requestedStats);
+            requestedTracks[canonical.libraryId()].push_back(requestedTrack);
+        }
+    }
+    for(const auto& [libraryId, libraryTracks] : requestedTracks) {
+        Q_EMIT externalTrackStatsChangeRequested(m_libraries.at(libraryId), libraryTracks,
+                                                 stats & handledStats(libraryTracks.front()));
+    }
+}
+
 WriteRequest StubMusicLibrary::removeUnavailbleTracks()
 {
     return {};
@@ -216,6 +245,88 @@ void StubMusicLibrary::setExternalLibraryActive(const LibraryInfo& library, bool
     Q_EMIT sourceActivationChanged();
 }
 
+void StubMusicLibrary::setExternalLibraryStatsHandler(const LibraryInfo& library, Track::Stats stats, QObject* handler)
+{
+    if(!m_libraries.contains(library.id)) {
+        return;
+    }
+    if(stats == Track::Stat::None || !handler) {
+        if(m_statsHandlers.erase(library.id) > 0) {
+            Q_EMIT externalLibraryStatsHandlerChanged();
+        }
+        return;
+    }
+    m_statsHandlers.insert_or_assign(library.id, StatsHandler{.stats = stats, .handler = handler});
+    QObject::connect(handler, &QObject::destroyed, this, [this, libraryId = library.id]() {
+        const auto current = m_statsHandlers.find(libraryId);
+        if(current != m_statsHandlers.end() && current->second.handler.isNull()) {
+            m_statsHandlers.erase(current);
+            Q_EMIT externalLibraryStatsHandlerChanged();
+        }
+    });
+    Q_EMIT externalLibraryStatsHandlerChanged();
+}
+
+void StubMusicLibrary::applyExternalTrackStats(const LibraryInfo& library, const TrackList& tracks, Track::Stats stats,
+                                               const QUuid& operation)
+{
+    const Track::Stats sourceStats = stats & m_sourceStats[library.id];
+    bool accepted = !operation.isNull() && m_libraries.contains(library.id) && sourceStats != Track::Stat::None
+                 && !tracks.empty();
+    for(const Track& track : tracks) {
+        const Track canonical = trackForId(track.id());
+        accepted              = accepted && canonical.isValid() && canonical.libraryId() == library.id
+                             && canonical.externalLibraryPath() == library.path;
+    }
+    if(!accepted) {
+        QTimer::singleShot(0, this, [this, operation, libraryId = library.id]() {
+            Q_EMIT externalTrackStatsFinished(operation, libraryId, false);
+        });
+        return;
+    }
+
+    const quint64 sequence = ++m_commitSequence;
+    TrackList changed;
+    for(const Track& reported : tracks) {
+        for(Track& track : m_tracks) {
+            if(track.id() != reported.id()) {
+                continue;
+            }
+            Track updated{track};
+            updated.replaceStats(reported, sourceStats);
+            if(sourceStats.testFlag(Track::Stat::Loved)) {
+                m_lovedPublications[track.id()] = sequence;
+            }
+            if(updated.isLoved() != track.isLoved() || updated.rating() != track.rating()
+               || updated.playCount() != track.playCount()) {
+                track = updated;
+                changed.push_back(track);
+            }
+        }
+    }
+    trackStatsPublications.push_back(tracks);
+    if(!changed.empty()) {
+        Q_EMIT tracksUpdated(changed);
+        Q_EMIT tracksStatsChanged(changed, sourceStats);
+    }
+    QTimer::singleShot(0, this, [this, operation, libraryId = library.id, success = !failTrackStats]() {
+        Q_EMIT externalTrackStatsFinished(operation, libraryId, success);
+    });
+}
+
+Track::Stats StubMusicLibrary::handledStats(const Track& canonical) const
+{
+    const auto handler = m_statsHandlers.find(canonical.libraryId());
+    if(handler == m_statsHandlers.end() || handler->second.handler.isNull() || !isTrackSourceActive(canonical)) {
+        return Track::Stat::None;
+    }
+    const auto library = m_libraries.find(canonical.libraryId());
+    if(library == m_libraries.end() || library->second.path != canonical.externalLibraryPath()) {
+        return Track::Stat::None;
+    }
+    return handler->second.stats & canonical.readOnlyStats();
+}
+
 bool StubMusicLibrary::isTrackSourceActive(const Track& track) const
 {
     const auto it = m_inactiveSources.find(track.externalLibraryPath());
@@ -227,7 +338,8 @@ void StubMusicLibrary::applyExternalLibrarySnapshot(const LibraryInfo& library, 
 {
     ++snapshotRequests;
     lastSnapshotOperation = operation;
-    QTimer::singleShot(snapshotDelayMs, this, [this, library, tracks, operation]() {
+    // Like the host commit queue, statistics published after this request survive the snapshot.
+    QTimer::singleShot(snapshotDelayMs, this, [this, library, tracks, operation, sequence = ++m_commitSequence]() {
         if(failSnapshots || !m_libraries.contains(library.id)) {
             Q_EMIT externalLibrarySnapshotFinished(operation, library.id, false);
 
@@ -247,6 +359,10 @@ void StubMusicLibrary::applyExternalLibrarySnapshot(const LibraryInfo& library, 
         for(Track track : tracks) {
             const auto it = existing.find(track.filepath());
             track.setId(it != existing.end() ? it->second.id() : m_nextTrackId++);
+            if(const auto published = m_lovedPublications.find(track.id());
+               it != existing.end() && published != m_lovedPublications.end() && published->second > sequence) {
+                track.setLoved(it->second.isLoved());
+            }
             track.setExternalLibraryPath(library.path);
             track.setReadOnlyStats(m_sourceStats[library.id]);
             track.setLibraryId(library.id);

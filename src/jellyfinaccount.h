@@ -45,6 +45,7 @@ namespace Jellyfin {
 class CatalogSync;
 class CredentialStore;
 class CredentialStateStore;
+class FavouriteSync;
 
 constexpr auto ServerUrlKey = "Jellyfin/ServerUrl";
 constexpr auto DeviceIdKey  = "Jellyfin/DeviceId";
@@ -75,6 +76,7 @@ public:
     [[nodiscard]] QString quickConnectCode() const;
     [[nodiscard]] QString status() const;
     [[nodiscard]] CatalogSync* catalogSync() const;
+    [[nodiscard]] FavouriteSync* favouriteSync() const;
 
 Q_SIGNALS:
     void statusChanged(const QString& status);
@@ -123,6 +125,7 @@ private:
     std::shared_ptr<CredentialStateStore> m_credentialStateStore;
     std::shared_ptr<CredentialStore> m_credentials;
     std::shared_ptr<AccessRegistry> m_access;
+    FavouriteSync* m_favouriteSync;
     CatalogSync* m_catalogSync;
     QTimer m_pollTimer;
     quint64 m_attemptCount{0};

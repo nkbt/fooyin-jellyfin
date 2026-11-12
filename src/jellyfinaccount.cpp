@@ -22,6 +22,7 @@
 #include "jellyfincatalogsync.h"
 #include "jellyfincredentialstatestore.h"
 #include "jellyfincredentialstore.h"
+#include "jellyfinfavouritesync.h"
 #include "jellyfinrequest.h"
 #include "jellyfintrack.h"
 
@@ -91,7 +92,8 @@ Account::Account(QNetworkAccessManager* network, MusicLibrary* library, Settings
     , m_credentialStateStore{std::move(credentialStateStore)}
     , m_credentials{std::move(credentials)}
     , m_access{std::move(access)}
-    , m_catalogSync{new CatalogSync(network, library, m_access, this)}
+    , m_favouriteSync{new FavouriteSync(network, library, m_access, this)}
+    , m_catalogSync{new CatalogSync(network, library, m_access, m_favouriteSync, this)}
     , m_credentialMutations{std::make_shared<CredentialMutationState>()}
 {
     m_credentialThreadPool.setMaxThreadCount(1);
@@ -132,6 +134,7 @@ Account::~Account()
 {
     m_shuttingDown = true;
     m_catalogSync->cancel();
+    m_favouriteSync->release();
     m_access->clearAccess();
     invalidateCredentials();
     m_credentialShutdown.request_stop();
@@ -686,6 +689,7 @@ QNetworkReply* Account::sendQuickConnect(const QString& path, const QUrlQuery& q
 void Account::activate(const Connection& connection, const QString& token)
 {
     m_catalogSync->cancel();
+    m_favouriteSync->release();
     if(m_connection
        && sourceKey(m_connection->serverId, m_connection->userId)
               != sourceKey(connection.serverId, connection.userId)) {
@@ -701,6 +705,7 @@ void Account::activate(const Connection& connection, const QString& token)
        = m_library->addExternalLibrary(libraryUri(sourceKey(connection.serverId, connection.userId)), libraryName())) {
         m_library->setExternalLibraryReadOnlyStats(*library, Track::Stat::Loved);
         m_library->setExternalLibraryActive(*library, true);
+        m_favouriteSync->activate(*library);
         std::unordered_map<QString, CatalogImage> images;
         for(const Track& track : m_library->tracks()) {
             if(track.libraryId() == library->id) {
@@ -756,6 +761,7 @@ void Account::signOut()
     m_credentialMutations->setAccepted({});
     cancelQuickConnect();
     m_catalogSync->cancel();
+    m_favouriteSync->release();
     m_access->clearAccess();
     m_connection.reset();
     reconcileSourceVisibility();
@@ -816,6 +822,11 @@ QString Account::status() const
 CatalogSync* Account::catalogSync() const
 {
     return m_catalogSync;
+}
+
+FavouriteSync* Account::favouriteSync() const
+{
+    return m_favouriteSync;
 }
 
 void Account::setStatus(const QString& status)

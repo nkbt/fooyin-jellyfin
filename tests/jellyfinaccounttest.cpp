@@ -23,6 +23,7 @@
 #include "jellyfinaccess.h"
 #include "jellyfincatalogsync.h"
 #include "jellyfincredentialstatestore.h"
+#include "jellyfinfavouritesync.h"
 #include "jellyfininput.h"
 #include "jellyfinpage.h"
 #include "jellyfintrack.h"
@@ -71,6 +72,7 @@ struct QuickConnectScenario
     std::atomic<int> connectStatus{200};
     QByteArray connectErrorBody;
     int exchangeDelayMs{0};
+    int favouriteDelayMs{0};
     QJsonObject exchangeResult{
         {u"AccessToken"_s, Token},
         {u"ServerId"_s, ServerId},
@@ -133,6 +135,11 @@ FakeJellyfinServer::Handler quickConnectHandler(std::shared_ptr<QuickConnectScen
         if(request.path.endsWith("/Items"_L1) && request.method == "GET") {
             return catalogResponse(request);
         }
+        if(request.path.endsWith("/UserFavoriteItems/track1"_L1)) {
+            FakeResponse response = FakeJellyfinServer::json(QJsonObject{{u"IsFavorite"_s, request.method == "POST"}});
+            response.delayMs      = scenario->favouriteDelayMs;
+            return response;
+        }
         return FakeJellyfinServer::text(404, "Not found");
     };
 }
@@ -145,6 +152,24 @@ QPushButton* findButton(const QWidget* widget, const QString& text)
         }
     }
     return nullptr;
+}
+
+std::vector<FakeRequest> favouriteRequests(const FakeJellyfinServer& server)
+{
+    std::vector<FakeRequest> found;
+    for(const auto& request : server.requests()) {
+        if(request.path.contains("/UserFavoriteItems/"_L1)) {
+            found.push_back(request);
+        }
+    }
+    return found;
+}
+
+void editLoved(MusicLibrary& library, const Track& track, bool loved)
+{
+    Track edited{library.trackForId(track.id())};
+    edited.setLoved(loved);
+    library.editTrackStats({edited}, Track::Stat::Loved);
 }
 
 bool hasLabel(const QWidget* widget, const QString& text)
@@ -1671,6 +1696,104 @@ TEST_F(JellyfinAccountTest, MalformedMetadataDoesNotBecomeEmptyAuthoritativeStat
     EXPECT_TRUE(m_server.requests().empty());
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     EXPECT_EQ(file.readAll(), QByteArray{"{malformed-state"});
+}
+
+TEST_F(JellyfinAccountTest, AccountSwitchRestoresAPendingFavouriteAndEditsWithTheNewAccount)
+{
+    auto first              = std::make_shared<QuickConnectScenario>();
+    first->pendingPolls     = 0;
+    first->favouriteDelayMs = 800;
+    m_server.setHandler(quickConnectHandler(first));
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_library.tracks().size() == 1 && !m_account.catalogSync()->isRunning(); }, 5000));
+    const Track firstTrack = m_library.tracks().front();
+    QSignalSpy failed{m_account.favouriteSync(), &FavouriteSync::failed};
+
+    editLoved(m_library, firstTrack, true);
+    EXPECT_TRUE(m_library.trackForId(firstTrack.id()).isLoved());
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 1; }, 5000));
+
+    auto second          = std::make_shared<QuickConnectScenario>();
+    second->pendingPolls = 0;
+    second->exchangeResult.insert(u"User"_s, QJsonObject{{u"Id"_s, u"user2"_s}, {u"Name"_s, u"Second User"_s}});
+    second->exchangeResult.insert(u"AccessToken"_s, u"synthetic-second-token"_s);
+    m_server.setHandler(quickConnectHandler(second));
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() {
+            return m_account.connection() && m_account.connection()->userId == u"user2"_s
+                && m_library.tracks().size() == 2 && !m_account.catalogSync()->isRunning();
+        },
+        5000));
+    EXPECT_FALSE(m_library.trackForId(firstTrack.id()).isLoved());
+    EXPECT_FALSE(m_library.canEditTrackStats(m_library.trackForId(firstTrack.id()), Track::Stat::Loved));
+    QTest::qWait(1000);
+    EXPECT_FALSE(m_library.trackForId(firstTrack.id()).isLoved());
+
+    Track secondTrack;
+    for(const Track& track : m_library.tracks()) {
+        if(track.libraryId() != firstTrack.libraryId()) {
+            secondTrack = track;
+        }
+    }
+    ASSERT_TRUE(m_library.canEditTrackStats(secondTrack, Track::Stat::Loved));
+    editLoved(m_library, secondTrack, true);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 2; }, 5000));
+    const FakeRequest request = favouriteRequests(m_server).back();
+    EXPECT_EQ(request.query.queryItemValue(u"userId"_s), u"user2"_s);
+    EXPECT_TRUE(request.header("authorization").contains("Token=\"synthetic-second-token\""));
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return m_library.trackForId(secondTrack.id()).isLoved(); }, 5000));
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinAccountTest, SignOutRestoresAPendingFavouriteAndStopsEditing)
+{
+    auto scenario              = std::make_shared<QuickConnectScenario>();
+    scenario->pendingPolls     = 0;
+    scenario->favouriteDelayMs = 800;
+    m_server.setHandler(quickConnectHandler(scenario));
+    m_account.startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&]() { return m_library.tracks().size() == 1 && !m_account.catalogSync()->isRunning(); }, 5000));
+    const Track track = m_library.tracks().front();
+    QSignalSpy failed{m_account.favouriteSync(), &FavouriteSync::failed};
+
+    editLoved(m_library, track, true);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 1; }, 5000));
+    m_account.signOut();
+    ASSERT_FALSE(m_account.connection());
+    EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
+    EXPECT_FALSE(m_library.canEditTrackStats(m_library.trackForId(track.id()), Track::Stat::Loved));
+
+    QTest::qWait(1000);
+    EXPECT_FALSE(m_library.trackForId(track.id()).isLoved());
+    EXPECT_EQ(favouriteRequests(m_server).size(), 1U);
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(JellyfinAccountTest, DestructionRestoresAPendingFavouriteAndClearsTheHandler)
+{
+    StubMusicLibrary library;
+    auto account  = std::make_unique<Account>(&m_network, &library, &m_settings, m_credentialStateStore, m_credentials,
+                                              m_access, 20ms, nullptr);
+    auto scenario = std::make_shared<QuickConnectScenario>();
+    scenario->pendingPolls     = 0;
+    scenario->favouriteDelayMs = 800;
+    m_server.setHandler(quickConnectHandler(scenario));
+    account->startQuickConnect(m_server.url({}).toString());
+    ASSERT_TRUE(
+        QTest::qWaitFor([&]() { return library.tracks().size() == 1 && !account->catalogSync()->isRunning(); }, 5000));
+    const Track track = library.tracks().front();
+
+    editLoved(library, track, true);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return favouriteRequests(m_server).size() == 1; }, 5000));
+    account.reset();
+    EXPECT_FALSE(library.trackForId(track.id()).isLoved());
+    EXPECT_FALSE(library.canEditTrackStats(library.trackForId(track.id()), Track::Stat::Loved));
+
+    QTest::qWait(1000);
+    EXPECT_FALSE(library.trackForId(track.id()).isLoved());
 }
 
 } // namespace Fooyin::Jellyfin::Testing
