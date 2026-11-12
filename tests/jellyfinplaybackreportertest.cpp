@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 
 using namespace Qt::StringLiterals;
@@ -200,8 +201,11 @@ TEST_F(JellyfinPlaybackReporterTest, FailureReportsOneFailedStopWithFinalPositio
     ASSERT_TRUE(waitForReports(2));
     const auto sent = reports();
     ASSERT_EQ(sent.size(), 2U);
-    EXPECT_TRUE(sent.at(1).body.value(u"Failed"_s).toBool());
-    EXPECT_EQ(sent.at(1).body.value(u"PositionTicks"_s).toInteger(), 123450000);
+    EXPECT_EQ(std::ranges::count(sent, u"Sessions/Playing"_s, &Report::path), 1);
+    const auto stopped = std::ranges::find(sent, u"Sessions/Playing/Stopped"_s, &Report::path);
+    ASSERT_NE(stopped, sent.end());
+    EXPECT_TRUE(stopped->body.value(u"Failed"_s).toBool());
+    EXPECT_EQ(stopped->body.value(u"PositionTicks"_s).toInteger(), 123450000);
 }
 
 TEST_F(JellyfinPlaybackReporterTest, UnconfirmedTrackHasNoReports)
