@@ -718,8 +718,9 @@ TEST(JellyfinNativeIntegration, LoveActionsEditJellyfinFavouritesAndReportFailur
     constexpr auto BodySentinel  = "synthetic-favourite-body";
     Application application;
     application.settingsManager()->set<Settings::Core::FirstRun>(false);
-    application.pluginManager()->findPlugins(
-        {QFileInfo(QString::fromUtf8(JELLYFIN_HOST_CORE_LIBRARY)).dir().filePath(u"plugins"_s)});
+    const auto FOOYIN_PLUGIN_PATH = qEnvironmentVariable("FOOYIN_PLUGIN_PATH").split(QDir::listSeparator(), Qt::SkipEmptyParts);
+    ASSERT_FALSE(FOOYIN_PLUGIN_PATH.isEmpty());
+    application.pluginManager()->findPlugins(FOOYIN_PLUGIN_PATH);
     GuiApplication gui{&application};
     const QByteArray screenshot = qgetenv("JELLYFIN_FAVOURITE_SCREENSHOT");
     if(!screenshot.isEmpty()) {
