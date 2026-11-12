@@ -70,10 +70,11 @@ void JellyfinPlugin::initialise(const CorePluginContext& context)
     m_settings    = context.settingsManager;
     m_remoteIo    = std::make_shared<RemoteIoService>(context.networkAccess, m_settings);
     m_network     = new QNetworkAccessManager(this);
+    const auto credentialStore = std::make_shared<AccountCredentialStore>(context.dbPool);
     m_account = new Account(m_network, context.library, m_settings,
                             std::make_shared<FileCredentialStateStore>(
                                 QDir{Utils::configPath(u"jellyfin"_s)}.filePath(u"credential-state.json"_s)),
-                            std::make_shared<SecretServiceCredentialStore>(), m_access, QuickConnectPollInterval, this);
+                            credentialStore, m_access, QuickConnectPollInterval, this);
     m_playbackReporter = new PlaybackReporter(m_network, m_access, this);
     m_playlistMirror   = std::make_unique<PlaylistMirror>(context.playlistHandler, m_settings);
 

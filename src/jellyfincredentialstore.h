@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include <core/accountstore.h>
+
 #include <QString>
 
 #include <optional>
@@ -32,7 +34,7 @@ struct TokenLookup
     QString error;
 };
 
-//! Holds access tokens outside the player profile.
+//! Stores access tokens for credential records.
 class CredentialStore
 {
 public:
@@ -46,13 +48,18 @@ public:
     [[nodiscard]] virtual QString removeToken(const QString& credentialRecordId, std::stop_token cancellation) = 0;
 };
 
-//! Stores tokens through the desktop Secret Service (libsecret).
-class SecretServiceCredentialStore : public CredentialStore
+//! Stores tokens through the host account database.
+class AccountCredentialStore : public CredentialStore
 {
 public:
+    explicit AccountCredentialStore(DbConnectionPoolPtr dbPool);
+
     [[nodiscard]] TokenLookup readToken(const QString& credentialRecordId, std::stop_token cancellation) override;
     [[nodiscard]] QString writeToken(const QString& credentialRecordId, const QString& token,
                                      std::stop_token cancellation) override;
     [[nodiscard]] QString removeToken(const QString& credentialRecordId, std::stop_token cancellation) override;
+private:
+    DbConnectionPoolPtr m_dbPool;
+    AccountStore m_accountStore;
 };
 } // namespace Fooyin::Jellyfin

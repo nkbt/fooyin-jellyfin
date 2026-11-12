@@ -227,8 +227,9 @@ TEST(JellyfinNativeIntegration, CatalogAndRealDecoderControllerUseConfirmedOccur
 {
     Application application;
     application.settingsManager()->set<Settings::Core::FirstRun>(false);
-    application.pluginManager()->findPlugins(
-        {QFileInfo(QString::fromUtf8(JELLYFIN_HOST_CORE_LIBRARY)).dir().filePath(u"plugins"_s)});
+    const auto FOOYIN_PLUGIN_PATH = qEnvironmentVariable("FOOYIN_PLUGIN_PATH").split(QDir::listSeparator(), Qt::SkipEmptyParts);
+    ASSERT_FALSE(FOOYIN_PLUGIN_PATH.isEmpty());
+    application.pluginManager()->findPlugins(FOOYIN_PLUGIN_PATH);
     ASSERT_FALSE(application.pluginManager()->allPluginInfo().empty());
     GuiApplication gui{&application};
     QStringList unexpectedDialogs;

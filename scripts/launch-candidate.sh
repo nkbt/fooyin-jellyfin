@@ -60,11 +60,11 @@ if [[ ! -e "$host_prefix/lib/fooyin/plugins/fyplugin_jellyfin.so" ]]; then
     exit 1
 fi
 
-mkdir --parents "$profile_dir"
+mkdir -p "$profile_dir"
 profile_dir="$(realpath "$profile_dir")"
-mkdir --parents "$profile_dir/home" "$profile_dir/config" "$profile_dir/data" "$profile_dir/cache" "$profile_dir/state"
+mkdir -p "$profile_dir/home" "$profile_dir/config" "$profile_dir/data" "$profile_dir/cache" "$profile_dir/state"
 
-# XDG_RUNTIME_DIR and the session bus stay unchanged, so the desktop secret service stores the session token.
+# The isolated profile contains the account database and its session tokens.
 export HOME="$profile_dir/home"
 export XDG_CONFIG_HOME="$profile_dir/config"
 export XDG_DATA_HOME="$profile_dir/data"
@@ -75,13 +75,17 @@ repository_root="$script_root"
 if git_common_dir="$(git -C "$script_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
     repository_root="$(dirname "$git_common_dir")"
 fi
-profile_key="$(printf '%s' "$profile_dir" | sha256sum | cut --characters=1-16)"
+if [[ "$(uname -s)" == Darwin ]]; then
+    profile_key="$(printf '%s' "$profile_dir" | shasum -a 256 | cut -c 1-16)"
+else
+    profile_key="$(printf '%s' "$profile_dir" | sha256sum | cut --characters=1-16)"
+fi
 export TMPDIR="$repository_root/tmp/ipc-$profile_key"
 if [[ ${#TMPDIR} -gt 65 ]]; then
     echo "The repository path is too long for an isolated local IPC namespace" >&2
     exit 1
 fi
-mkdir --parents "$TMPDIR"
+mkdir -p "$TMPDIR"
 chmod 700 "$TMPDIR"
 unset FOOYIN_PLUGIN_PATH
 

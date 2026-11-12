@@ -19,99 +19,68 @@
 
 #include "jellyfincredentialstore.h"
 
+#include <utils/database/dbconnectionhandler.h>
+
 #include <QCoreApplication>
 
-#include <memory>
-
-#undef signals
-#include <libsecret/secret.h>
-#define signals Q_SIGNALS
+using namespace Qt::StringLiterals;
 
 namespace Fooyin::Jellyfin {
-namespace {
-const SecretSchema* tokenSchema()
-{
-    static const SecretSchema schema{
-        "org.fooyin.jellyfin.AccessToken",
-        SECRET_SCHEMA_NONE,
-        {
-            {"credential-record-id", SECRET_SCHEMA_ATTRIBUTE_STRING},
-            {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING},
-        },
-        0,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-    };
-    return &schema;
-}
+AccountCredentialStore::AccountCredentialStore(DbConnectionPoolPtr dbPool)
+    : m_dbPool{std::move(dbPool)}
+    , m_accountStore{m_dbPool}
+{ }
 
-QString unavailableError(GError* error)
+TokenLookup AccountCredentialStore::readToken(const QString& credentialRecordId, std::stop_token cancellation)
 {
-    QString message = QCoreApplication::translate(
-        "Jellyfin", "The desktop secret service is unavailable. Start or unlock a Secret Service provider such as "
-                    "GNOME Keyring or KWallet, then sign in again.");
-    if(error) {
-        g_error_free(error);
+    if(cancellation.stop_requested()) {
+        return {.token = {}, .error = QCoreApplication::translate("Jellyfin", "Credential operation cancelled.")};
     }
-    return message;
-}
-} // namespace
-
-TokenLookup SecretServiceCredentialStore::readToken(const QString& credentialRecordId, std::stop_token cancellation)
-{
-    const auto cancellable
-        = std::unique_ptr<GCancellable, decltype(&g_object_unref)>{g_cancellable_new(), &g_object_unref};
-    std::stop_callback interrupted{cancellation, [handle = cancellable.get()]() { g_cancellable_cancel(handle); }};
-    GError* error                            = nullptr;
-    const QByteArray credentialRecordIdBytes = credentialRecordId.toUtf8();
-    gchar* password = secret_password_lookup_sync(tokenSchema(), cancellable.get(), &error, "credential-record-id",
-                                                  credentialRecordIdBytes.constData(), nullptr);
-    if(error) {
-        return {.token = {}, .error = unavailableError(error)};
+    const DbConnectionHandler connection{m_dbPool};
+    if(!m_dbPool || !m_dbPool->hasThreadConnection()) {
+        return {.token = {}, .error = QCoreApplication::translate("Jellyfin", "Cannot open the fooyin account database.")};
     }
-    if(!password) {
+    const auto values = m_accountStore.load(u"Jellyfin/"_s + credentialRecordId, {u"AccessToken"_s});
+    if(!values) {
+        return {.token = {}, .error = QCoreApplication::translate("Jellyfin", "Cannot read the Jellyfin account.")};
+    }
+    if(cancellation.stop_requested()) {
+        return {.token = {}, .error = QCoreApplication::translate("Jellyfin", "Credential operation cancelled.")};
+    }
+    const auto token = values->find(u"AccessToken"_s);
+    if(token == values->end() || token->second.isEmpty()) {
         return {};
     }
-
-    TokenLookup lookup{.token = QString::fromUtf8(password), .error = {}};
-    secret_password_free(password);
-    return lookup;
+    return {.token = token->second, .error = {}};
 }
 
-QString SecretServiceCredentialStore::writeToken(const QString& credentialRecordId, const QString& token,
-                                                 std::stop_token cancellation)
+QString AccountCredentialStore::writeToken(const QString& credentialRecordId, const QString& token,
+                                          std::stop_token cancellation)
 {
-    const auto cancellable
-        = std::unique_ptr<GCancellable, decltype(&g_object_unref)>{g_cancellable_new(), &g_object_unref};
-    std::stop_callback interrupted{cancellation, [handle = cancellable.get()]() { g_cancellable_cancel(handle); }};
-    GError* error                            = nullptr;
-    const QByteArray credentialRecordIdBytes = credentialRecordId.toUtf8();
-    const QByteArray value                   = token.toUtf8();
-    const gboolean stored                    = secret_password_store_sync(
-        tokenSchema(), SECRET_COLLECTION_DEFAULT, "Fooyin Jellyfin access token", value.constData(), cancellable.get(),
-        &error, "credential-record-id", credentialRecordIdBytes.constData(), nullptr);
-    if(error || !stored) {
-        return unavailableError(error);
+    if(cancellation.stop_requested()) {
+        return QCoreApplication::translate("Jellyfin", "Credential operation cancelled.");
+    }
+    const DbConnectionHandler connection{m_dbPool};
+    if(!m_dbPool || !m_dbPool->hasThreadConnection()) {
+        return QCoreApplication::translate("Jellyfin", "Cannot open the fooyin account database.");
+    }
+    if(!m_accountStore.save(u"Jellyfin/"_s + credentialRecordId, {{u"AccessToken"_s, token}})) {
+        return QCoreApplication::translate("Jellyfin", "Cannot save the Jellyfin account.");
     }
     return {};
 }
 
-QString SecretServiceCredentialStore::removeToken(const QString& credentialRecordId, std::stop_token cancellation)
+QString AccountCredentialStore::removeToken(const QString& credentialRecordId, std::stop_token cancellation)
 {
-    const auto cancellable
-        = std::unique_ptr<GCancellable, decltype(&g_object_unref)>{g_cancellable_new(), &g_object_unref};
-    std::stop_callback interrupted{cancellation, [handle = cancellable.get()]() { g_cancellable_cancel(handle); }};
-    GError* error                            = nullptr;
-    const QByteArray credentialRecordIdBytes = credentialRecordId.toUtf8();
-    secret_password_clear_sync(tokenSchema(), cancellable.get(), &error, "credential-record-id",
-                               credentialRecordIdBytes.constData(), nullptr);
-    if(error) {
-        return unavailableError(error);
+    if(cancellation.stop_requested()) {
+        return QCoreApplication::translate("Jellyfin", "Credential operation cancelled.");
+    }
+    const DbConnectionHandler connection{m_dbPool};
+    if(!m_dbPool || !m_dbPool->hasThreadConnection()) {
+        return QCoreApplication::translate("Jellyfin", "Cannot open the fooyin account database.");
+    }
+    if(!m_accountStore.remove(u"Jellyfin/"_s + credentialRecordId, {u"AccessToken"_s})) {
+        return QCoreApplication::translate("Jellyfin", "Cannot remove the Jellyfin account.");
     }
     return {};
 }
