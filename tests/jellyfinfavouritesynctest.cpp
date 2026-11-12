@@ -617,6 +617,82 @@ TEST_F(JellyfinFavouriteSyncTest, ChoiceMatchingASubmittedCatalogShowsAtOnceWith
     EXPECT_TRUE(failed.isEmpty());
 }
 
+TEST_F(JellyfinFavouriteSyncTest, RefreshConfirmingAPendingEditIsTheRollbackValue)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    m_server->failingItems = {u"track1"_s};
+    m_server->delayMs      = 800;
+
+    edit(u"track1"_s, true);
+    ASSERT_TRUE(waitForRequests(1));
+    // The server applied the change but its reply fails.
+    m_server->setFavourite(u"track1"_s, true);
+    ASSERT_TRUE(runSync());
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_TRUE(failed.isEmpty());
+    const size_t publications = m_library.trackStatsPublications.size();
+
+    ASSERT_TRUE(failed.wait(5000));
+    settle();
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_EQ(m_library.trackStatsPublications.size(), publications);
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_EQ(favouriteRequests().size(), 1U);
+}
+
+TEST_F(JellyfinFavouriteSyncTest, CatalogFetchedBeforeAServerResultCannotReplaceTheRollbackValue)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy finished{&m_sync, &CatalogSync::finished};
+    m_server->catalogDelayMs = 600;
+
+    m_sync.start(u"Jellyfin: Synthetic User"_s);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return !m_fake.requestsForPath(u"/jf/Items"_s).empty(); }, 5000));
+    edit(u"track1"_s, true);
+    ASSERT_TRUE(waitForRequests(1));
+    settle();
+    ASSERT_TRUE(finished.wait(10000));
+    ASSERT_TRUE(finished.first().at(0).toBool());
+    EXPECT_TRUE(loved(u"track1"_s));
+
+    m_server->status = 500;
+    edit(u"track1"_s, false);
+    EXPECT_FALSE(loved(u"track1"_s));
+    ASSERT_TRUE(failed.wait(5000));
+    settle();
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_EQ(favouriteRequests().size(), 2U);
+}
+
+TEST_F(JellyfinFavouriteSyncTest, CatalogConfirmsAPendingEditWithoutReplacingANewerChoice)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy finished{&m_sync, &CatalogSync::finished};
+    m_server->setFavourite(u"track0"_s, false);
+    m_server->failingItems   = {u"track0"_s};
+    m_server->catalogDelayMs = 300;
+    m_server->delayMs        = 800;
+
+    m_sync.start(u"Jellyfin: Synthetic User"_s);
+    ASSERT_TRUE(QTest::qWaitFor([&]() { return !m_fake.requestsForPath(u"/jf/Items"_s).empty(); }, 5000));
+    edit(u"track0"_s, false);
+    ASSERT_TRUE(waitForRequests(1));
+    edit(u"track0"_s, true);
+    ASSERT_TRUE(finished.wait(10000));
+    ASSERT_TRUE(finished.first().at(0).toBool());
+    EXPECT_TRUE(loved(u"track0"_s));
+    EXPECT_TRUE(failed.isEmpty());
+
+    ASSERT_TRUE(failed.wait(5000));
+    settle();
+    EXPECT_FALSE(loved(u"track0"_s));
+    EXPECT_EQ(failed.size(), 1);
+    ASSERT_EQ(favouriteRequests().size(), 2U);
+    EXPECT_EQ(favouriteRequests().front().method, "DELETE");
+    EXPECT_EQ(favouriteRequests().back().method, "POST");
+}
+
 TEST_F(JellyfinFavouriteSyncTest, RepeatedRefreshKeepsOneHandlerRegistration)
 {
     QSignalSpy handlerChanged{&m_library, &MusicLibrary::externalLibraryStatsHandlerChanged};

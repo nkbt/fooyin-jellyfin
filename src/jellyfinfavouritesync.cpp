@@ -114,6 +114,7 @@ void FavouriteSync::reconcileSnapshot(const Access& access, const LibraryInfo& l
     }
 
     m_catalogFavourites.clear();
+    m_catalogSequence = snapshotSequence;
     for(Track& track : tracks) {
         const QString itemId = itemIdFromPath(track.filepath());
         m_catalogFavourites.insert_or_assign(itemId, track.isLoved());
@@ -122,6 +123,11 @@ void FavouriteSync::reconcileSnapshot(const Access& access, const LibraryInfo& l
             continue;
         }
         Edit& edit = it->second;
+        // Only a server result after the catalog started is newer; a later choice is not a server value.
+        if(edit.confirmedSequence <= snapshotSequence) {
+            edit.confirmed         = track.isLoved();
+            edit.confirmedSequence = snapshotSequence;
+        }
         if(edit.reply || edit.sequence > snapshotSequence) {
             track.setLoved(edit.desired);
         }
@@ -180,9 +186,10 @@ void FavouriteSync::handleChangeRequested(const LibraryInfo& library, const Trac
         Edit& edit          = it->second;
         if(inserted) {
             // The library shows an older value until a submitted catalog is stored.
-            const auto catalog = m_catalogFavourites.find(itemId);
-            edit.confirmed     = catalog != m_catalogFavourites.end() ? catalog->second : shown;
-            edit.desired       = edit.confirmed;
+            const auto catalog     = m_catalogFavourites.find(itemId);
+            edit.confirmed         = catalog != m_catalogFavourites.end() ? catalog->second : shown;
+            edit.confirmedSequence = m_catalogSequence;
+            edit.desired           = edit.confirmed;
         }
         edit.trackId = track.id();
         if(track.isLoved() == edit.desired && shown == edit.desired) {
@@ -252,7 +259,8 @@ void FavouriteSync::handleReply(QNetworkReply* reply, const QString& itemId)
     }
 
     if(favourite) {
-        edit.confirmed = *favourite;
+        edit.confirmed         = *favourite;
+        edit.confirmedSequence = edit.sequence;
     }
 
     if(edit.desired != edit.sent) {

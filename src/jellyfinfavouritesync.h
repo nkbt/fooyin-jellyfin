@@ -59,7 +59,7 @@ public:
 
     //! Increases with every edit and server result.
     [[nodiscard]] quint64 sequence() const;
-    //! Accepts a recreated @p library and keeps pending edits or edits newer than @p snapshotSequence in @p tracks.
+    //! Accepts a recreated @p library, confirms edits with a catalog from @p snapshotSequence and keeps newer edits.
     void reconcileSnapshot(const Access& access, const LibraryInfo& library, TrackList& tracks,
                            quint64 snapshotSequence);
 
@@ -73,6 +73,8 @@ private:
         int trackId{-1};
         //! The last value the server reported or the catalog delivered.
         bool confirmed{false};
+        //! The sequence at which the server reported @c confirmed, so an older catalog cannot replace it.
+        quint64 confirmedSequence{0};
         bool desired{false};
         bool sent{false};
         quint64 sequence{0};
@@ -99,6 +101,7 @@ private:
     std::map<QString, Edit> m_edits;
     //! The favourite of every item in the latest catalog, by item ID.
     std::map<QString, bool> m_catalogFavourites;
+    quint64 m_catalogSequence{0};
     std::set<QUuid> m_operations;
     QMetaObject::Connection m_handlerChangedConnection;
     quint64 m_sequence{0};
