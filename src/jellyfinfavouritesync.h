@@ -59,7 +59,7 @@ public:
 
     //! Increases with every edit and server result.
     [[nodiscard]] quint64 sequence() const;
-    //! Accepts a recreated @p library, confirms edits with a catalog from @p snapshotSequence and keeps newer edits.
+    //! Accepts a recreated @p library and confirms edits with a catalog from @p snapshotSequence.
     void reconcileSnapshot(const Access& access, const LibraryInfo& library, TrackList& tracks,
                            quint64 snapshotSequence);
 
@@ -77,7 +77,6 @@ private:
         quint64 confirmedSequence{0};
         bool desired{false};
         bool sent{false};
-        quint64 sequence{0};
         QPointer<QNetworkReply> reply;
         std::optional<std::stop_callback<std::function<void()>>> cancellation;
     };

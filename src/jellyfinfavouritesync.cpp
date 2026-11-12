@@ -124,11 +124,13 @@ void FavouriteSync::reconcileSnapshot(const Access& access, const LibraryInfo& l
         }
         Edit& edit = it->second;
         // Only a server result after the catalog started is newer; a later choice is not a server value.
-        if(edit.confirmedSequence <= snapshotSequence) {
+        const bool catalogIsNewer = edit.confirmedSequence <= snapshotSequence;
+        if(catalogIsNewer) {
             edit.confirmed         = track.isLoved();
             edit.confirmedSequence = snapshotSequence;
         }
-        if(edit.reply || edit.sequence > snapshotSequence) {
+        // A pending request still carries the latest choice; a settled edit shows the newest server value.
+        if(edit.reply || !catalogIsNewer) {
             track.setLoved(edit.desired);
         }
         else {
@@ -196,7 +198,7 @@ void FavouriteSync::handleChangeRequested(const LibraryInfo& library, const Trac
             continue;
         }
 
-        edit.sequence = ++m_sequence;
+        ++m_sequence;
         published.push_back(track);
         if(track.isLoved() == edit.desired) {
             continue;
@@ -240,7 +242,7 @@ void FavouriteSync::handleReply(QNetworkReply* reply, const QString& itemId)
     Edit& edit = it->second;
     edit.reply = nullptr;
     edit.cancellation.reset();
-    edit.sequence = ++m_sequence;
+    ++m_sequence;
 
     QString error;
     std::optional<bool> favourite;
@@ -260,7 +262,7 @@ void FavouriteSync::handleReply(QNetworkReply* reply, const QString& itemId)
 
     if(favourite) {
         edit.confirmed         = *favourite;
-        edit.confirmedSequence = edit.sequence;
+        edit.confirmedSequence = m_sequence;
     }
 
     if(edit.desired != edit.sent) {

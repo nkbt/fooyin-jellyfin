@@ -640,6 +640,31 @@ TEST_F(JellyfinFavouriteSyncTest, RefreshConfirmingAPendingEditIsTheRollbackValu
     EXPECT_EQ(favouriteRequests().size(), 1U);
 }
 
+TEST_F(JellyfinFavouriteSyncTest, RefreshFinishingAfterAFailedEditShowsItsConfirmation)
+{
+    QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
+    QSignalSpy finished{&m_sync, &CatalogSync::finished};
+    m_server->failingItems   = {u"track1"_s};
+    m_server->delayMs        = 200;
+    m_server->catalogDelayMs = 800;
+
+    edit(u"track1"_s, true);
+    ASSERT_TRUE(waitForRequests(1));
+    // The server applied the change but its reply fails.
+    m_server->setFavourite(u"track1"_s, true);
+    m_sync.start(u"Jellyfin: Synthetic User"_s);
+    ASSERT_TRUE(failed.wait(5000));
+    EXPECT_TRUE(finished.isEmpty());
+    EXPECT_FALSE(loved(u"track1"_s));
+
+    ASSERT_TRUE(finished.wait(10000));
+    ASSERT_TRUE(finished.first().at(0).toBool());
+    settle();
+    EXPECT_TRUE(loved(u"track1"_s));
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_EQ(favouriteRequests().size(), 1U);
+}
+
 TEST_F(JellyfinFavouriteSyncTest, CatalogFetchedBeforeAServerResultCannotReplaceTheRollbackValue)
 {
     QSignalSpy failed{&m_favourites, &FavouriteSync::failed};
