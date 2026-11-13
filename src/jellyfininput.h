@@ -69,7 +69,7 @@ private:
     std::shared_ptr<RemoteIoService> m_remoteIo;
     RemoteStreamSource m_source;
     std::shared_ptr<AudioDecoder> m_decoder;
-    std::atomic<std::shared_ptr<AudioDecoder>> m_interruptDecoder;
+    std::shared_ptr<AudioDecoder> m_interruptDecoder;
     uint64_t m_sourceGeneration{0};
 };
 

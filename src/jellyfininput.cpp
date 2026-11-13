@@ -164,7 +164,7 @@ std::optional<AudioFormat> Decoder::init(const AudioSource& source, const Track&
     }
     m_decoder->setPlaybackHints(playbackHints());
 
-    m_interruptDecoder.store(m_decoder);
+    std::atomic_store(&m_interruptDecoder, m_decoder);
     if(abortToken().stop_requested()) {
         m_decoder->requestAbort();
         stop();
@@ -203,7 +203,7 @@ void Decoder::start()
 
 void Decoder::stop()
 {
-    m_interruptDecoder.store(nullptr);
+    std::atomic_store(&m_interruptDecoder, std::shared_ptr<AudioDecoder>{});
     m_sourceGeneration = 0;
     if(m_decoder) {
         m_decoder->stop();
@@ -247,7 +247,7 @@ void Decoder::playbackHintsChanged(PlaybackHints hints)
 
 void Decoder::interruptRead()
 {
-    if(const auto decoder = m_interruptDecoder.load()) {
+    if(const auto decoder = std::atomic_load(&m_interruptDecoder)) {
         decoder->requestAbort();
     }
 }

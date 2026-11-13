@@ -31,18 +31,22 @@
 #include "jellyfinplaybackreporter.h"
 #include "jellyfinplaylistmirror.h"
 
+#include <core/coresettings.h>
 #include <core/engine/enginecontroller.h>
 #include <core/network/networkaccessmanager.h>
 #include <core/network/remoteioservice.h>
 #include <core/playlist/playlisthandler.h>
 #include <core/plugins/coreplugincontext.h>
+#include <gui/layout/layoutprovider.h>
 #include <gui/plugins/guiplugincontext.h>
 #include <gui/windowcontroller.h>
 #include <utils/fypaths.h>
+#include <utils/settings/settingsmanager.h>
 
 #include <QDir>
 #include <QMainWindow>
 #include <QNetworkAccessManager>
+#include <QResource>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
@@ -70,10 +74,11 @@ void JellyfinPlugin::initialise(const CorePluginContext& context)
     m_settings    = context.settingsManager;
     m_remoteIo    = std::make_shared<RemoteIoService>(context.networkAccess, m_settings);
     m_network     = new QNetworkAccessManager(this);
+    const auto credentialStore = std::make_shared<AccountCredentialStore>(context.dbPool);
     m_account = new Account(m_network, context.library, m_settings,
                             std::make_shared<FileCredentialStateStore>(
                                 QDir{Utils::configPath(u"jellyfin"_s)}.filePath(u"credential-state.json"_s)),
-                            std::make_shared<SecretServiceCredentialStore>(), m_access, QuickConnectPollInterval, this);
+                            credentialStore, m_access, QuickConnectPollInterval, this);
     m_playbackReporter = new PlaybackReporter(m_network, m_access, this);
     m_playlistMirror   = std::make_unique<PlaylistMirror>(context.playlistHandler, m_settings);
 
@@ -99,6 +104,15 @@ void JellyfinPlugin::initialise(const GuiPluginContext& context)
 {
     new JellyfinPage(m_account, m_settings, this);
     connectFavouriteBanner(m_account->favouriteSync(), context.windowController->mainWindow());
+
+    const FyLayout layout{QResource{u":/jellyfin/layouts/jellyfin.fyl"_s}.uncompressedData()};
+    context.layoutProvider->registerLayout(layout);
+    const FyStateSettings stateSettings;
+    if(m_settings->value<Settings::Core::FirstRun>()
+       && stateSettings.value(u"Interface/ActiveLayout"_s).toString().isEmpty()
+       && !context.layoutProvider->currentLayout().isValid()) {
+        context.layoutProvider->changeLayout(layout);
+    }
 }
 
 void JellyfinPlugin::shutdown()

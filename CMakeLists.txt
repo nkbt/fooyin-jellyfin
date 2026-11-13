@@ -16,8 +16,6 @@ option(BUILD_TESTING "Build the plugin tests" ON)
 
 find_package(Fooyin 0.15 REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Widgets Concurrent)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
 
 add_library(
     jellyfin_library OBJECT
@@ -66,7 +64,6 @@ target_link_libraries(
            Qt6::Concurrent
            Qt6::Network
            Qt6::Widgets
-           PkgConfig::LIBSECRET
 )
 
 create_fooyin_plugin(
@@ -76,6 +73,7 @@ create_fooyin_plugin(
             src/jellyfinplugin.h
     JSON_IN src/jellyfin.json.in
 )
+qt_add_resources(jellyfin jellyfin_layout PREFIX "/jellyfin" BASE data FILES data/layouts/jellyfin.fyl)
 
 if(BUILD_TESTING)
     enable_testing()
